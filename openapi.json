@@ -1,0 +1,3865 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Edgaze API",
+    "version": "1.0.0",
+    "description": "Public REST API for running Edgaze workflows programmatically. Every response uses the same envelope: success returns the payload directly; failure returns `{ error: { code, message, details? } }`.",
+    "contact": {
+      "name": "Edgaze",
+      "url": "https://edgaze.ai/docs/api"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.edgaze.ai/v1",
+      "description": "Production"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Workflows",
+      "description": "Discover and inspect runnable workflows."
+    },
+    {
+      "name": "Runs",
+      "description": "Start runs and read their durable event log."
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Send `Authorization: Bearer <api key>` on every request. Each operation lists the scopes it accepts in `x-required-scopes`, evaluated as `x-scope-match: any`: holding ANY ONE of the listed scopes authorizes the call. A key missing all of them gets 403 `insufficient_scope`."
+      }
+    },
+    "schemas": {
+      "ErrorCode": {
+        "type": "string",
+        "enum": [
+          "unauthorized",
+          "insufficient_scope",
+          "forbidden",
+          "not_found",
+          "invalid_request",
+          "invalid_json",
+          "invalid_inputs",
+          "missing_workflow",
+          "invalid_cursor",
+          "method_not_allowed",
+          "spend_cap_reached",
+          "idempotency_conflict",
+          "rate_limited",
+          "internal_error"
+        ],
+        "description": "Stable, machine-friendly error identifier. Branch on this value; the human `message` may change. Two codes are transport-level rather than operation-specific and so are not listed under any single path: `method_not_allowed` (an HTTP method this route does not implement, returned with an `Allow` header) and `invalid_json` (a request body that is not parseable JSON).",
+        "examples": ["invalid_inputs"]
+      },
+      "ErrorDetail": {
+        "type": "object",
+        "properties": {
+          "input": {
+            "type": "string",
+            "description": "The offending input key (`nodeId` or exact `name`).",
+            "examples": ["topic"]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable explanation of why this input was rejected.",
+            "examples": ["is required"]
+          }
+        },
+        "required": ["input", "message"],
+        "additionalProperties": false,
+        "description": "Per-input failure attached to `invalid_inputs` errors."
+      },
+      "ErrorObject": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "$ref": "#/components/schemas/ErrorCode"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable failure reason. Do not parse; branch on `code` instead.",
+            "examples": ["Rate limit exceeded. Slow down and retry."]
+          },
+          "details": {
+            "description": "Present only on `invalid_inputs`; describes each rejected input.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
+          }
+        },
+        "required": ["code", "message"],
+        "additionalProperties": false,
+        "description": "Inner error body carried by every failure response."
+      },
+      "ErrorEnvelope": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/ErrorObject"
+          }
+        },
+        "required": ["error"],
+        "additionalProperties": false,
+        "description": "Envelope returned by every non-2xx response from the v1 REST API.",
+        "examples": [
+          {
+            "error": {
+              "code": "unauthorized",
+              "message": "Invalid or missing API key."
+            }
+          }
+        ]
+      },
+      "RunModel": {
+        "type": "string",
+        "enum": ["free", "per_run"],
+        "description": "Pricing model for a workflow listing."
+      },
+      "UserAccess": {
+        "type": "string",
+        "enum": ["owned", "purchased", "wallet", "purchase_required"],
+        "description": "How the authenticated key holder can currently pay to run this workflow: `owned` (the caller is the creator), `purchased` (a prior purchase covers it), or `wallet` (it will be billed to wallet balance at run time). `purchase_required` marks legacy unlock listings that cannot be run or bought through the API — `apiRunnableNow` is false and POST /runs returns 403 `forbidden`. Purchasing is a web-only checkout flow; send the buyer to `purchaseUrl` on the workflow detail response."
+      },
+      "CredentialMode": {
+        "type": "string",
+        "enum": ["edgaze_hosted", "byok"],
+        "description": "Whether the workflow runs on Edgaze-hosted credentials or the caller's own keys."
+      },
+      "RequiredProvider": {
+        "type": "string",
+        "enum": ["openai", "anthropic", "google", "azure_openai", "vertex", "openrouter"],
+        "description": "External model provider a BYOK workflow expects the caller to configure."
+      },
+      "PublicRunStatus": {
+        "type": "string",
+        "enum": ["pending", "running", "suspended", "completed", "failed", "cancelled"],
+        "description": "Canonical run status exposed by the public API."
+      },
+      "BillingStatus": {
+        "type": "string",
+        "enum": ["pending", "settled", "not_charged"],
+        "description": "Whether the buyer-facing charge for this run is still pending, finalized, or not applicable."
+      },
+      "RunListStatus": {
+        "type": "string",
+        "enum": ["pending", "running", "completed", "failed", "cancelled"],
+        "description": "Run status as reported by the run list. A suspended run is reported as `running` — read GET /runs/{id} for the precise state."
+      },
+      "Pagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Offset of the first row in this page."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Page size actually applied (max 50)."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "True when another page follows this one."
+          }
+        },
+        "required": ["offset", "limit", "hasMore"],
+        "additionalProperties": false,
+        "description": "Offset-based pagination cursor for list endpoints."
+      },
+      "WorkflowListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ownerHandle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "edgazeCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runModel": {
+            "$ref": "#/components/schemas/RunModel"
+          },
+          "displayedRunPriceUsd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estimated buyer-facing run price (creator margin + hosted compute). Final settlement uses the live displayed quote frozen at run start and can differ slightly from this catalog snapshot. USD amount as a JSON number. Metered internally in microdollars (1e-6 USD) and not rounded to cents, so values below one cent are reported exactly. Do not assume two decimal places; sum in microdollars (multiply by 1e6 and round) if you need exact arithmetic."
+          },
+          "pricingExplanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive estimate; explains that settlement uses the live quote at run start."
+          },
+          "userAccess": {
+            "$ref": "#/components/schemas/UserAccess"
+          },
+          "accessLabel": {
+            "type": "string"
+          },
+          "apiRunnableNow": {
+            "type": "boolean"
+          },
+          "runsCount": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "credentialMode": {
+            "$ref": "#/components/schemas/CredentialMode"
+          },
+          "requiredProviders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequiredProvider"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "ownerHandle",
+          "edgazeCode",
+          "runModel",
+          "displayedRunPriceUsd",
+          "pricingExplanation",
+          "userAccess",
+          "accessLabel",
+          "apiRunnableNow",
+          "runsCount",
+          "credentialMode",
+          "requiredProviders"
+        ],
+        "additionalProperties": false,
+        "description": "Compact row in the paginated workflow catalog. Fetch GET /workflows/{id} for the input schema."
+      },
+      "WorkflowListResponse": {
+        "type": "object",
+        "properties": {
+          "workflows": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowListItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "required": ["workflows", "pagination"],
+        "additionalProperties": false,
+        "description": "Response body for GET /workflows."
+      },
+      "WorkflowInputType": {
+        "type": "string",
+        "enum": ["text", "password", "number", "textarea", "url", "file", "json", "dropdown"],
+        "description": "Control type for an input field. `dropdown` is the only type that populates `options`. `password` fields are per-run credentials: encrypted at rest and deleted when the run ends. `file` and `json` expect a JSON-encoded value."
+      },
+      "WorkflowInputOption": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Human-readable choice shown to a person."
+          },
+          "value": {
+            "type": "string",
+            "description": "Value to send in `inputs` when this choice is picked."
+          }
+        },
+        "required": ["label", "value"],
+        "additionalProperties": false,
+        "description": "One selectable choice for a `dropdown` input."
+      },
+      "WorkflowInputField": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Stable key for this field. Use it as the `inputs` key when calling POST /runs — `name` is a display label and is not guaranteed unique."
+          },
+          "specId": {
+            "description": "Identifier of the node kind that produced this field. Informational.",
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "description": "Display label for the field."
+          },
+          "description": {
+            "description": "Helper text explaining the field.",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/WorkflowInputType"
+          },
+          "required": {
+            "description": "When true, POST /runs rejects the run if this key is absent.",
+            "type": "boolean"
+          },
+          "placeholder": {
+            "description": "Suggested placeholder text.",
+            "type": "string"
+          },
+          "defaultValue": {
+            "description": "Pre-filled value to use when the caller supplies nothing.",
+            "type": "string"
+          },
+          "options": {
+            "description": "Allowed choices. Present only when `type` is `dropdown`.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowInputOption"
+            }
+          }
+        },
+        "required": ["nodeId", "name", "type"],
+        "additionalProperties": false,
+        "description": "Single input field from the workflow's published input schema."
+      },
+      "WorkflowRunResponseShape": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              "status": {
+                "type": "string"
+              },
+              "statusUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "eventsUrl": {
+                "type": "string",
+                "format": "uri"
+              },
+              "streamUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": ["id", "status", "statusUrl", "eventsUrl", "streamUrl"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["run"],
+        "additionalProperties": false,
+        "description": "Documentation-only shape showing what POST /runs returns for this workflow."
+      },
+      "WorkflowExampleRunRequest": {
+        "type": "object",
+        "properties": {
+          "method": {
+            "type": "string",
+            "const": "POST"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "body": {
+            "type": "object",
+            "properties": {
+              "workflow": {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              "inputs": {
+                "type": "object",
+                "propertyNames": {
+                  "type": "string"
+                },
+                "additionalProperties": {}
+              },
+              "idempotencyKey": {
+                "type": "string"
+              }
+            },
+            "required": ["workflow", "inputs"],
+            "additionalProperties": {}
+          }
+        },
+        "required": ["method", "url", "body"],
+        "additionalProperties": false,
+        "description": "Ready-to-copy example POST /runs payload for this workflow."
+      },
+      "WorkflowDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ownerHandle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "edgazeCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "runModel": {
+            "$ref": "#/components/schemas/RunModel"
+          },
+          "displayedRunPriceUsd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estimated buyer-facing run price (creator margin + hosted compute). Final settlement uses the live displayed quote frozen at run start and can differ slightly from this catalog snapshot. USD amount as a JSON number. Metered internally in microdollars (1e-6 USD) and not rounded to cents, so values below one cent are reported exactly. Do not assume two decimal places; sum in microdollars (multiply by 1e6 and round) if you need exact arithmetic."
+          },
+          "pricingExplanation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive estimate; explains that settlement uses the live quote at run start."
+          },
+          "userAccess": {
+            "$ref": "#/components/schemas/UserAccess"
+          },
+          "accessLabel": {
+            "type": "string"
+          },
+          "apiRunnableNow": {
+            "type": "boolean"
+          },
+          "apiAccessAllowed": {
+            "type": "boolean"
+          },
+          "purchaseUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uri"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Web checkout page for this workflow, or `null` when it has no public listing. Purchasing is not available through the API; send a buyer here when `userAccess` is `purchase_required`."
+          },
+          "credentialMode": {
+            "$ref": "#/components/schemas/CredentialMode"
+          },
+          "requiredProviders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RequiredProvider"
+            }
+          },
+          "versionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "versionLabel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinnedVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version the caller is pinned to via a prior purchase, or `null` when they follow the active version."
+          },
+          "activeVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current active version published by the workflow owner."
+          },
+          "updateAvailable": {
+            "type": "boolean",
+            "description": "True when the caller is pinned to an older version than the active one. Same workflow id can execute different immutable graphs."
+          },
+          "inputCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "inputSchema": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowInputField"
+            }
+          },
+          "responseShape": {
+            "$ref": "#/components/schemas/WorkflowRunResponseShape"
+          },
+          "exampleRequest": {
+            "$ref": "#/components/schemas/WorkflowExampleRunRequest"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "ownerHandle",
+          "edgazeCode",
+          "runModel",
+          "displayedRunPriceUsd",
+          "pricingExplanation",
+          "userAccess",
+          "accessLabel",
+          "apiRunnableNow",
+          "apiAccessAllowed",
+          "purchaseUrl",
+          "credentialMode",
+          "requiredProviders",
+          "versionId",
+          "versionLabel",
+          "pinnedVersionId",
+          "activeVersionId",
+          "updateAvailable",
+          "inputCount",
+          "inputSchema",
+          "responseShape",
+          "exampleRequest"
+        ],
+        "additionalProperties": false,
+        "description": "Full workflow detail with input schema and version visibility."
+      },
+      "CreateRunRequest": {
+        "type": "object",
+        "properties": {
+          "workflow": {
+            "description": "Workflow UUID to run.",
+            "examples": ["550e8400-e29b-41d4-a716-446655440000"],
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "workflowId": {
+            "description": "Deprecated compatibility alias for `workflow`. Prefer `workflow`. When both are set, `workflow` wins.",
+            "deprecated": true,
+            "examples": ["550e8400-e29b-41d4-a716-446655440000"],
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "inputs": {
+            "description": "Map of exact input `nodeId` (preferred) or `name` to value, using the keys from the workflow's `inputSchema`. Unknown or ambiguous keys are rejected with 400 `invalid_inputs`. Omit entirely for a workflow that takes no inputs.",
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          },
+          "idempotencyKey": {
+            "description": "Optional account-scoped, case-sensitive idempotency key (max 255 chars). Prefer the `Idempotency-Key` header; when both are set they must match. The fingerprint covers workflow, normalized inputs, and requested version.",
+            "type": "string",
+            "maxLength": 255
+          },
+          "version": {
+            "description": "Optional immutable workflow version to run. When omitted, resolves to the caller's pinned version, or the workflow's active version when there is no pin.",
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          }
+        },
+        "description": "Request body for POST /runs."
+      },
+      "AcceptedRun": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid",
+            "description": "Run UUID. Use it for every follow-up run call."
+          },
+          "status": {
+            "type": "string",
+            "const": "accepted",
+            "description": "Always the constant `accepted`. This is an acknowledgement that the run was durably enqueued, not a lifecycle status: it is deliberately NOT a `PublicRunStatus` value, because no execution has happened yet. Read GET /runs/{id} for the real status."
+          },
+          "statusUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Absolute URL for GET /runs/{id}."
+          },
+          "eventsUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Absolute URL for GET /runs/{id}/events."
+          },
+          "streamUrl": {
+            "type": "string",
+            "format": "uri",
+            "description": "Absolute URL for the SSE stream."
+          }
+        },
+        "required": ["id", "status", "statusUrl", "eventsUrl", "streamUrl"],
+        "additionalProperties": false,
+        "description": "The `run` sub-object returned by POST /runs (202 Accepted)."
+      },
+      "CreateRunResponse": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/AcceptedRun"
+          }
+        },
+        "required": ["run"],
+        "additionalProperties": false,
+        "description": "Response body for POST /runs (202 Accepted)."
+      },
+      "RunOutputField": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          },
+          "value": {}
+        },
+        "required": ["nodeId", "name", "type", "value"],
+        "additionalProperties": {},
+        "description": "One output produced by the workflow."
+      },
+      "Run": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PublicRunStatus"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Buyer-safe failure explanation. Non-null only when `status` is `failed`; provider-specific detail is deliberately generalized."
+          },
+          "suspended": {
+            "type": "boolean",
+            "description": "True exactly when `status` is `suspended`; kept as a separate flag so a caller can test for 'waiting' without matching on the status enum. A run suspends for one of two reasons, reported as `reason` on the `run.suspended` event: `wait_timer` (a delay node) resumes itself when the timer fires, while `wait_signal` (the workflow needs credentials) waits for the buyer to supply them on the web run page. The API cannot resume a run; POST /runs/{id}/cancel is the only way for an API caller to end one early."
+          },
+          "workflowId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workflowVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "displayedChargeUsd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Buyer-facing charge. `null` until the run settles. USD amount as a JSON number. Metered internally in microdollars (1e-6 USD) and not rounded to cents, so values below one cent are reported exactly. Do not assume two decimal places; sum in microdollars (multiply by 1e6 and round) if you need exact arithmetic."
+          },
+          "billingStatus": {
+            "$ref": "#/components/schemas/BillingStatus"
+          },
+          "outputs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunOutputField"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "reason",
+          "suspended",
+          "workflowId",
+          "workflowVersionId",
+          "startedAt",
+          "completedAt",
+          "displayedChargeUsd",
+          "billingStatus",
+          "outputs"
+        ],
+        "additionalProperties": false,
+        "description": "Response body for GET /runs/{id}."
+      },
+      "RunListItem": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RunListStatus"
+          },
+          "workflowId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "workflowVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "displayedChargeUsd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "billingStatus": {
+            "$ref": "#/components/schemas/BillingStatus"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "workflowId",
+          "workflowVersionId",
+          "startedAt",
+          "completedAt",
+          "displayedChargeUsd",
+          "billingStatus"
+        ],
+        "additionalProperties": false,
+        "description": "Compact row in the run history. Outputs and failure reasons are omitted here — read GET /runs/{id} for a single run's full detail."
+      },
+      "RunListResponse": {
+        "type": "object",
+        "properties": {
+          "runs": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunListItem"
+            }
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "required": ["runs", "pagination"],
+        "additionalProperties": false,
+        "description": "Response body for GET /runs."
+      },
+      "CancelRunResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "status": {
+            "description": "Status after the cancel request. `cancelled` once the run is torn down; a terminal status is returned unchanged when the run had already finished.",
+            "$ref": "#/components/schemas/PublicRunStatus"
+          },
+          "cancelRequested": {
+            "type": "boolean",
+            "description": "True when this call initiated the cancellation, false when the run was already in a terminal state and nothing changed."
+          }
+        },
+        "required": ["id", "status", "cancelRequested"],
+        "additionalProperties": false,
+        "description": "Response body for POST /runs/{id}/cancel."
+      },
+      "RunEventData": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "description": "Incremental output text. Present on `node.output.delta`; concatenate in `sequence` order to reconstruct a node's streamed output.",
+            "type": "string"
+          },
+          "status": {
+            "description": "Run status implied by this event. Present on run lifecycle events.",
+            "$ref": "#/components/schemas/PublicRunStatus"
+          },
+          "reason": {
+            "description": "Why the run failed, suspended, or a node was skipped. Sanitized to the same buyer-safe text as `Run.reason`.",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "description": "Event-specific content, projected to the fields that are safe for the caller."
+      },
+      "RunEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "run.queued",
+                  "run.preparing",
+                  "run.started",
+                  "run.suspended",
+                  "run.resumed",
+                  "run.completed",
+                  "run.failed",
+                  "run.cancelled",
+                  "node.started",
+                  "node.output.delta",
+                  "node.completed",
+                  "node.failed",
+                  "node.retry_scheduled",
+                  "node.skipped"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Event name. The listed values are every type emitted today; branch on them. The union stays open to plain strings on purpose, because adding an event type is not a breaking change: ignore values you do not recognize instead of failing."
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Monotonic, gap-free position in this run's log. Use as the `afterSequence` cursor and to order events."
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "nodeId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Workflow node this event belongs to, or `null` for run-level events."
+          },
+          "attempt": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "1-based execution attempt for node events; `null` for run-level events."
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunEventData"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Event-specific content, or `null` when this event type carries none."
+          }
+        },
+        "required": ["type", "sequence", "ts", "nodeId", "attempt", "data"],
+        "additionalProperties": false,
+        "description": "One row in the durable run event log."
+      },
+      "RunEventsPage": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "events": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunEvent"
+            }
+          },
+          "hasMore": {
+            "type": "boolean"
+          },
+          "nextAfterSequence": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass as `afterSequence` to fetch the next page. `null` when `hasMore` is false."
+          }
+        },
+        "required": ["id", "events", "hasMore", "nextAfterSequence"],
+        "additionalProperties": false,
+        "description": "Response body for GET /runs/{id}/events."
+      },
+      "WorkflowVersionSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "releaseNotes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "isActive": {
+            "type": "boolean"
+          },
+          "isPurchased": {
+            "type": "boolean"
+          }
+        },
+        "required": ["id", "createdAt", "releaseNotes", "isActive", "isPurchased"],
+        "additionalProperties": false,
+        "description": "Compact metadata for one immutable workflow version."
+      },
+      "WorkflowVersionsResponse": {
+        "type": "object",
+        "properties": {
+          "isOwner": {
+            "type": "boolean"
+          },
+          "activeVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "pinnedVersionId": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "updateAvailable": {
+            "type": "boolean"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkflowVersionSummary"
+            }
+          }
+        },
+        "required": [
+          "isOwner",
+          "activeVersionId",
+          "pinnedVersionId",
+          "updateAvailable",
+          "versions"
+        ],
+        "additionalProperties": false,
+        "description": "Response body for GET /workflows/{id}/versions. Owners see the full history; buyers see the versions their pin or entitlement covers."
+      },
+      "AcceptWorkflowUpdateResponse": {
+        "type": "object",
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "const": true
+          },
+          "workflowId": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "pinnedVersionId": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          }
+        },
+        "required": ["ok", "workflowId", "pinnedVersionId"],
+        "additionalProperties": false,
+        "description": "Confirms the buyer's purchase pin was re-pinned to the workflow's current active version."
+      },
+      "WebhookRunEventPayload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid",
+            "description": "Unique event id, safe to dedupe on."
+          },
+          "type": {
+            "type": "string",
+            "enum": ["run.completed", "run.failed", "run.cancelled"]
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "type": "object",
+            "properties": {
+              "runId": {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              "workflowId": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "format": "uuid"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "status": {
+                "$ref": "#/components/schemas/PublicRunStatus"
+              },
+              "displayedChargeUsd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": ["runId", "workflowId", "status"],
+            "additionalProperties": {}
+          }
+        },
+        "required": ["id", "type", "createdAt", "data"],
+        "additionalProperties": false,
+        "description": "Body posted to a webhook endpoint when a run reaches a terminal state."
+      },
+      "WebhookTestPayload": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "type": {
+            "type": "string",
+            "const": "webhook.test"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "data": {
+            "type": "object",
+            "propertyNames": {
+              "type": "string"
+            },
+            "additionalProperties": {}
+          }
+        },
+        "required": ["id", "type", "createdAt", "data"],
+        "additionalProperties": false,
+        "description": "Body posted when a receiver clicks Send test in the developer console."
+      }
+    }
+  },
+  "paths": {
+    "/workflows": {
+      "get": {
+        "operationId": "listWorkflows",
+        "summary": "List workflows",
+        "description": "Discover current free and pay-per-run workflows in the paginated marketplace catalog. `scope=mine` returns the caller's current workflows.",
+        "tags": ["Workflows"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read", "run:execute"],
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Marketplace catalog or the key holder's current workflows. Defaults to `marketplace`.",
+              "type": "string",
+              "enum": ["marketplace", "mine"]
+            }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Search title, description, tags, owner handle, or Edgaze Code.",
+              "type": "string"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Pagination offset; used with `marketplace` scope.",
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Page size (max 50). Defaults to 24.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Marketplace sort order. Defaults to `popular`.",
+              "type": "string",
+              "enum": ["popular", "newest"]
+            }
+          },
+          {
+            "name": "runModel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "Filter by pricing model.",
+              "$ref": "#/components/schemas/RunModel"
+            }
+          },
+          {
+            "name": "runnableOnly",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "description": "When `true`, only workflows the key holder can run right now.",
+              "type": "string",
+              "enum": ["true", "false"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated workflow catalog.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "message": "Invalid query parameters."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key is missing the required scope.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "API key is missing the required scope."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/workflows/{id}": {
+      "get": {
+        "operationId": "getWorkflow",
+        "summary": "Get workflow",
+        "description": "Retrieve a single workflow with its input schema, access state, pricing, version visibility, and an example run request.",
+        "tags": ["Workflows"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read", "run:execute"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID of the workflow.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID of the workflow.",
+              "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Workflow detail.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or malformed workflow id.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "missing_workflow",
+                        "message": "Missing or malformed workflow id."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not entitled to this workflow.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "forbidden",
+                        "message": "Not entitled to this workflow."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Workflow not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/workflows/{id}/versions": {
+      "get": {
+        "operationId": "listWorkflowVersions",
+        "summary": "List workflow versions",
+        "description": "Return the versions the caller is entitled to see for a workflow. Owners see the full history; buyers see the version their pin covers plus the current active version. Also returns the caller's `pinnedVersionId` / `activeVersionId` and an `updateAvailable` flag so integrators can decide whether to POST `/workflows/{id}/accept-update`.",
+        "tags": ["Workflows"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read", "run:execute"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID of the workflow.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID of the workflow.",
+              "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Entitled workflow versions.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkflowVersionsResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or malformed workflow id.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "missing_workflow",
+                        "message": "Missing or malformed workflow id."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not entitled to this workflow.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "forbidden",
+                        "message": "Not entitled to this workflow."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Workflow not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/workflows/{id}/accept-update": {
+      "post": {
+        "operationId": "acceptWorkflowUpdate",
+        "summary": "Accept workflow update",
+        "description": "Re-pin the caller's purchase to the workflow's current active version. Requires the `workflow:write` scope (kept out of the default key scopes on purpose). Idempotent: accepting when already on the active version returns 200 with the current pin unchanged. Owner keys do not have a purchase to re-pin and receive 403.",
+        "tags": ["Workflows"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["workflow:write"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID of the workflow.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID of the workflow.",
+              "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Purchase pin updated.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptWorkflowUpdateResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing or malformed workflow id.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "missing_workflow",
+                        "message": "Missing or malformed workflow id."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Rejected for one of two reasons that need different client handling. `insufficient_scope`: the key lacks `workflow:write` — mint a key with that scope. `forbidden`: the key is valid and scoped, but the caller has no purchase to re-pin (including owner keys, which have no purchase) — there is nothing to retry. Branch on `error.code`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "missing_scope": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "This API key is missing the required scope: workflow:write."
+                      }
+                    }
+                  },
+                  "no_purchase": {
+                    "value": {
+                      "error": {
+                        "code": "forbidden",
+                        "message": "You do not have access to this workflow."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Workflow has no active version to accept.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "message": "Workflow has no active version to accept."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/runs": {
+      "get": {
+        "operationId": "listRuns",
+        "summary": "List runs",
+        "description": "Return the caller's own runs, newest first. Projected from the indexed run row rather than folded from the event log, so it omits `outputs` and `reason` and reports a suspended run as `running` — read GET /runs/{id} for a single run in full. Rate limiting: reads are not metered per-key today — only POST /runs is (60/minute). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "tags": ["Runs"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read"],
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "description": "Return only runs currently in this status.",
+            "schema": {
+              "description": "Return only runs currently in this status.",
+              "$ref": "#/components/schemas/RunListStatus"
+            }
+          },
+          {
+            "name": "workflow",
+            "in": "query",
+            "required": false,
+            "description": "Return only runs of this workflow id.",
+            "schema": {
+              "description": "Return only runs of this workflow.",
+              "type": "string",
+              "minLength": 1,
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "description": "Pagination offset. Defaults to 0.",
+            "schema": {
+              "description": "Pagination offset. Defaults to 0.",
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size from 1 to 50. Defaults to 24.",
+            "schema": {
+              "description": "Page size (max 50). Defaults to 24.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated run history.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunListResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid query parameters.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "message": "Invalid query parameters."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key is missing the required scope.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "API key is missing the required scope."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      },
+      "post": {
+        "operationId": "createRun",
+        "summary": "Create run",
+        "description": "Start an asynchronous workflow run. Returns 202 with URLs to poll status, read events, and stream progress.",
+        "tags": ["Runs"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:execute"],
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Optional idempotency key (max 255 chars). Prefer the header over `body.idempotencyKey`; when both are set they must match, or the request is rejected with 400 `invalid_request`. Values are case-sensitive and scoped to the Edgaze account. The fingerprint covers workflow, normalized inputs, and requested version. An exact replay returns the original run; a different request returns 409 `idempotency_conflict`. Keys have no time-based expiry while the run record exists.",
+            "schema": {
+              "type": "string",
+              "maxLength": 255
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Run accepted.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request rejected before the run started. `invalid_json`: the body was not parseable JSON. `missing_workflow`: no `workflow` id was supplied. `invalid_inputs`: one or more inputs were rejected — `error.details` lists the offending `input` keys. `invalid_request`: the `Idempotency-Key` header conflicted with `body.idempotencyKey`.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "invalid_inputs": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_inputs",
+                        "message": "One or more inputs were rejected.",
+                        "details": [
+                          {
+                            "input": "topic",
+                            "message": "is required"
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  "missing_workflow": {
+                    "value": {
+                      "error": {
+                        "code": "missing_workflow",
+                        "message": "Provide a `workflow` id to run."
+                      }
+                    }
+                  },
+                  "invalid_json": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_json",
+                        "message": "Request body must be valid JSON."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "402": {
+            "description": "This API key has reached its spend cap.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "spend_cap_reached",
+                        "message": "This API key has reached its spend cap."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not entitled to run this workflow.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "forbidden",
+                        "message": "Not entitled to run this workflow."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Workflow not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Workflow not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Idempotency key reused with a different request.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "idempotency_conflict",
+                        "message": "Idempotency key reused with a different request."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limited (60 POST /runs per minute per API key).",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Limit": {
+                "description": "Requests permitted per minute (currently 60 per API key).",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-RateLimit-Remaining": {
+                "description": "Requests remaining in the current window.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "Rate limit exceeded. Slow down and retry."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/runs/{id}": {
+      "get": {
+        "operationId": "getRun",
+        "summary": "Get run",
+        "description": "Read the run's canonical status, sanitized failure reason, buyer-facing displayed charge, and outputs. Rate limiting: reads are not metered per-key today — only POST /runs is (60/minute). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "tags": ["Runs"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID returned from POST /runs.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID returned from POST /runs.",
+              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Run detail.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Run"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key is missing the required scope.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "API key is missing the required scope."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found (also returned for cross-tenant reads).",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Run not found (also returned for cross-tenant reads)."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/runs/{id}/cancel": {
+      "post": {
+        "operationId": "cancelRun",
+        "summary": "Cancel run",
+        "description": "Request cancellation of a run that is still in flight. Idempotent: a run that already reached a terminal state is returned unchanged with `cancelRequested: false`. Cancellation is asynchronous at the worker, but the run is marked `cancelled` before this call returns, and a `run.cancelled` webhook is dispatched. A cancelled run is never charged to the buyer (`billingStatus` settles to `not_charged`). Requires `run:execute`, not `run:read`, because it changes the run's outcome.",
+        "tags": ["Runs"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:execute"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID returned from POST /runs.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID returned from POST /runs.",
+              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cancellation recorded.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelRunResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key is missing the required scope.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "API key is missing the required scope."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found (also returned for cross-tenant calls).",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Run not found (also returned for cross-tenant calls)."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/runs/{id}/events": {
+      "get": {
+        "operationId": "listRunEvents",
+        "summary": "List run events",
+        "description": "Return an ordered, bounded page of durable run lifecycle events. Continue from `nextAfterSequence` while `hasMore` is true. Each event carries a `data` object with the content for its type — most importantly `data.text` on `node.output.delta`, which you concatenate in `sequence` order to reconstruct a node's streamed output. Rate limiting: reads are not metered per-key today — only POST /runs is (60/minute). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "tags": ["Runs"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID returned from POST /runs.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID returned from POST /runs.",
+              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "required": false,
+            "description": "Return events strictly after this sequence. Defaults to 0.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "description": "Page size from 1 to 500. Defaults to 100.",
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Ordered page of events.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunEventsPage"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid pagination cursor.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_request",
+                        "message": "Invalid pagination cursor."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key is missing the required scope.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "API key is missing the required scope."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Run not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected server error.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    },
+    "/runs/{id}/stream": {
+      "get": {
+        "operationId": "streamRun",
+        "summary": "Stream run",
+        "description": "Server-Sent Events stream of the run's log. Resume with the `Last-Event-ID` header to skip already-received sequences. Each SSE `data:` frame is a `RunEvent` — the `event:` name is the event type (or `run.status` for lifecycle transitions) and `id:` is the `sequence`. Node output arrives as `node.output.delta` frames whose `data.text` you append in order, so this is the endpoint to build a live progress UI on rather than polling.",
+        "tags": ["Runs"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scopes": ["run:read"],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "description": "UUID returned from POST /runs.",
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "description": "UUID returned from POST /runs.",
+              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+            }
+          },
+          {
+            "name": "Last-Event-ID",
+            "in": "header",
+            "required": false,
+            "description": "SSE resume cursor. When present, must be a non-negative integer; the server replays events with a strictly greater sequence.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "afterSequence",
+            "in": "query",
+            "required": false,
+            "description": "Alternative resume cursor when the client cannot set the header.",
+            "schema": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SSE stream of run events.",
+            "headers": {
+              "Cache-Control": {
+                "description": "`private, no-store, no-transform` so intermediaries never buffer the stream.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Includes `Authorization`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Accel-Buffering": {
+                "description": "`no` — signals proxies to disable buffering.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "SSE-encoded event stream."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid `Last-Event-ID` cursor.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "invalid_cursor",
+                        "message": "Invalid `Last-Event-ID` cursor."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Invalid or missing API key.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "unauthorized",
+                        "message": "Invalid or missing API key."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "API key is missing the required scope.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "insufficient_scope",
+                        "message": "API key is missing the required scope."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "not_found",
+                        "message": "Run not found."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "x-scope-match": "any"
+      }
+    }
+  },
+  "webhooks": {
+    "run.completed": {
+      "post": {
+        "summary": "Run reached the completed state.",
+        "description": "Sent once a run settles successfully, after billing has committed, so `displayedChargeUsd` on the run is final. Delivery is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no replay: a non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization and reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not guaranteed. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "parameters": [
+          {
+            "name": "edgaze-signature",
+            "in": "header",
+            "required": true,
+            "description": "Signature of this delivery, formatted `t=<unix seconds>,v1=<hex hmac>`. Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely.",
+            "schema": {
+              "type": "string",
+              "examples": ["t=1800000000,v1=5257a869e7…"]
+            }
+          },
+          {
+            "name": "edgaze-webhook-id",
+            "in": "header",
+            "required": true,
+            "description": "UUID of the endpoint that this delivery was sent to. Use it to select the right secret when one receiver serves several endpoints.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookRunEventPayload"
+              }
+            }
+          },
+          "description": "Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely."
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not retried."
+          }
+        }
+      }
+    },
+    "run.failed": {
+      "post": {
+        "summary": "Run reached the failed state.",
+        "description": "Sent once a run terminates unsuccessfully. The payload carries the same buyer-safe `reason` as GET /runs/{id}. Delivery is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no replay: a non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization and reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not guaranteed. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "parameters": [
+          {
+            "name": "edgaze-signature",
+            "in": "header",
+            "required": true,
+            "description": "Signature of this delivery, formatted `t=<unix seconds>,v1=<hex hmac>`. Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely.",
+            "schema": {
+              "type": "string",
+              "examples": ["t=1800000000,v1=5257a869e7…"]
+            }
+          },
+          {
+            "name": "edgaze-webhook-id",
+            "in": "header",
+            "required": true,
+            "description": "UUID of the endpoint that this delivery was sent to. Use it to select the right secret when one receiver serves several endpoints.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookRunEventPayload"
+              }
+            }
+          },
+          "description": "Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely."
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not retried."
+          }
+        }
+      }
+    },
+    "run.cancelled": {
+      "post": {
+        "summary": "Run was cancelled.",
+        "description": "Sent after POST /runs/{id}/cancel or a cancellation from the web UI. A cancelled run is never charged. Delivery is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no replay: a non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization and reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not guaranteed. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "parameters": [
+          {
+            "name": "edgaze-signature",
+            "in": "header",
+            "required": true,
+            "description": "Signature of this delivery, formatted `t=<unix seconds>,v1=<hex hmac>`. Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely.",
+            "schema": {
+              "type": "string",
+              "examples": ["t=1800000000,v1=5257a869e7…"]
+            }
+          },
+          {
+            "name": "edgaze-webhook-id",
+            "in": "header",
+            "required": true,
+            "description": "UUID of the endpoint that this delivery was sent to. Use it to select the right secret when one receiver serves several endpoints.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookRunEventPayload"
+              }
+            }
+          },
+          "description": "Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely."
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not retried."
+          }
+        }
+      }
+    },
+    "webhook.test": {
+      "post": {
+        "summary": "Manual test delivery from the developer console.",
+        "description": "A synthetic payload triggered from the Edgaze dashboard to verify a receiver. It is never produced by a real run, so ignore it in production handlers. Delivery is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no replay: a non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization and reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not guaranteed. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "parameters": [
+          {
+            "name": "edgaze-signature",
+            "in": "header",
+            "required": true,
+            "description": "Signature of this delivery, formatted `t=<unix seconds>,v1=<hex hmac>`. Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely.",
+            "schema": {
+              "type": "string",
+              "examples": ["t=1800000000,v1=5257a869e7…"]
+            }
+          },
+          {
+            "name": "edgaze-webhook-id",
+            "in": "header",
+            "required": true,
+            "description": "UUID of the endpoint that this delivery was sent to. Use it to select the right secret when one receiver serves several endpoints.",
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookTestPayload"
+              }
+            }
+          },
+          "description": "Signed with HMAC-SHA256 over the exact string `{t}.{raw request body}`, using your endpoint secret. Compare in constant time against the raw bytes you received, before JSON parsing: re-serializing the body changes the signature. Reject any delivery whose `t` is more than 300 seconds from your clock, otherwise a captured payload can be replayed indefinitely."
+        },
+        "responses": {
+          "200": {
+            "description": "Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not retried."
+          }
+        }
+      }
+    }
+  }
+}
