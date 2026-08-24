@@ -1,0 +1,46 @@
+# Refresh openapi.json / openapi.yaml from the live production document.
+# No extra secrets. GITHUB_TOKEN can commit to this repository.
+name: Sync from production
+
+on:
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: sync-from-production
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    name: Sync OpenAPI from production
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install js-yaml
+        run: npm install --no-save js-yaml@4.3.1
+
+      - name: Pull production document
+        run: node scripts/sync-from-production.mjs
+
+      - name: Commit and push
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add openapi.json openapi.yaml
+          if git diff --cached --quiet; then
+            echo "Already up to date."
+            exit 0
+          fi
+          git commit -m "Sync OpenAPI 3.1 from production"
+          git push origin HEAD:main

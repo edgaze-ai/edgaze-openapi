@@ -1,0 +1,35 @@
+name: Validate spec
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate OpenAPI 3.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install js-yaml
+        run: npm install --no-save js-yaml@4.3.1
+      - name: JSON and YAML must parse to the same document
+        run: |
+          node --input-type=module -e "
+          import { readFileSync } from 'node:fs';
+          import { createRequire } from 'node:module';
+          const require = createRequire(import.meta.url);
+          const yaml = require('js-yaml');
+          const json = JSON.parse(readFileSync('openapi.json', 'utf8'));
+          const fromYaml = yaml.load(readFileSync('openapi.yaml', 'utf8'));
+          if (json.openapi !== '3.1.0') throw new Error('openapi must be 3.1.0');
+          if (JSON.stringify(json) !== JSON.stringify(fromYaml)) throw new Error('JSON and YAML differ');
+          console.log('ok', json.info.version, Object.keys(json.paths || {}).length, 'paths');
+          "
