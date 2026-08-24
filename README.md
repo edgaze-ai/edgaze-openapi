@@ -41,9 +41,9 @@ This repository is the pin. The live URLs move with production.
 
 ## How this repository is updated
 
-The spec is generated from the public API in [edgaze-ai/edgaze](https://github.com/edgaze-ai/edgaze). Two automatic paths keep this repository current:
+The spec is generated from the public API in [edgaze-ai/edgaze](https://github.com/edgaze-ai/edgaze). Two automatic paths keep this repository current. Both commit as [`edgaze-openapi[bot]`](https://github.com/apps/edgaze-openapi):
 
-1. On merge to `main` in the product repo, a publish workflow copies the committed document here when `OPENAPI_PUBLISH_TOKEN` is configured.
+1. On merge to `main` in the product repo, a publish workflow copies the committed document here.
 2. This repository also pulls `https://www.edgaze.ai/openapi.json` every 20 minutes and refreshes JSON and YAML.
 
 Do not edit `openapi.json` or `openapi.yaml` by hand; those files are overwritten.
