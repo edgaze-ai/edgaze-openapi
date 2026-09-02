@@ -231,7 +231,7 @@
                 "type": "null"
               }
             ],
-            "description": "Estimated buyer-facing run price (creator margin + hosted compute). Final settlement uses the live displayed quote frozen at run start and can differ slightly from this catalog snapshot. USD amount as a JSON number. Metered internally in microdollars (1e-6 USD) and not rounded to cents, so values below one cent are reported exactly. Do not assume two decimal places; sum in microdollars (multiply by 1e6 and round) if you need exact arithmetic."
+            "description": "Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places."
           },
           "pricingExplanation": {
             "anyOf": [
@@ -503,7 +503,7 @@
                 "type": "null"
               }
             ],
-            "description": "Estimated buyer-facing run price (creator margin + hosted compute). Final settlement uses the live displayed quote frozen at run start and can differ slightly from this catalog snapshot. USD amount as a JSON number. Metered internally in microdollars (1e-6 USD) and not rounded to cents, so values below one cent are reported exactly. Do not assume two decimal places; sum in microdollars (multiply by 1e6 and round) if you need exact arithmetic."
+            "description": "Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places."
           },
           "pricingExplanation": {
             "anyOf": [
@@ -831,7 +831,7 @@
                 "type": "null"
               }
             ],
-            "description": "Buyer-facing charge. `null` until the run settles. USD amount as a JSON number. Metered internally in microdollars (1e-6 USD) and not rounded to cents, so values below one cent are reported exactly. Do not assume two decimal places; sum in microdollars (multiply by 1e6 and round) if you need exact arithmetic."
+            "description": "Buyer-facing charge. `null` until the run settles. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places."
           },
           "billingStatus": {
             "$ref": "#/components/schemas/BillingStatus"
