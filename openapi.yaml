@@ -562,9 +562,9 @@ components:
           additionalProperties: {}
         idempotencyKey:
           description: >-
-            Optional account-scoped, case-sensitive idempotency key (max 255 chars). Prefer the `Idempotency-Key`
-            header; when both are set they must match. The fingerprint covers workflow, normalized inputs, and requested
-            version.
+            Currently optional for backward compatibility, but strongly recommended for every request. Account-scoped
+            and case-sensitive (max 255 chars). Prefer the `Idempotency-Key` header; when both are set they must match.
+            The fingerprint covers workflow, normalized inputs, and requested version.
           type: string
           maxLength: 255
         version:
@@ -1840,11 +1840,12 @@ paths:
           in: header
           required: false
           description: >-
-            Optional idempotency key (max 255 chars). Prefer the header over `body.idempotencyKey`; when both are set
-            they must match, or the request is rejected with 400 `invalid_request`. Values are case-sensitive and scoped
-            to the Edgaze account. The fingerprint covers workflow, normalized inputs, and requested version. An exact
-            replay returns the original run; a different request returns 409 `idempotency_conflict`. Keys have no
-            time-based expiry while the run record exists.
+            Currently optional for backward compatibility, but strongly recommended for every request (max 255 chars).
+            Prefer the header over `body.idempotencyKey`; when both are set they must match, or the request is rejected
+            with 400 `invalid_request`. Values are case-sensitive and scoped to the Edgaze account. The fingerprint
+            covers workflow, normalized inputs, and requested version. An exact replay returns the original run; a
+            different request returns 409 `idempotency_conflict`. Keys have no time-based expiry while the run record
+            exists.
           schema:
             type: string
             maxLength: 255
@@ -2643,10 +2644,13 @@ webhooks:
       summary: Run reached the completed state.
       description: >-
         Sent once a run settles successfully, after billing has committed, so `displayedChargeUsd` on the run is final.
-        Delivery is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no
-        replay: a non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization
-        and reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not
-        guaranteed. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.
+        Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or
+        timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer
+        Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an
+        event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across
+        retries. Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint whose deliveries fail
+        15 times consecutively is paused until it is re-enabled in the developer console. Return 2xx as soon as you have
+        persisted the payload, and do the real work asynchronously.
       parameters:
         - name: edgaze-signature
           in: header
@@ -2670,6 +2674,33 @@ webhooks:
           schema:
             type: string
             format: uuid
+        - name: edgaze-delivery-id
+          in: header
+          required: false
+          description: >-
+            UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication
+            key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again.
+            Absent only on a manual test delivery, which is never retried.
+          schema:
+            type: string
+            format: uuid
+        - name: edgaze-attempt
+          in: header
+          required: true
+          description: 1-indexed attempt number for this delivery. A value above 1 means an earlier attempt did not return 2xx.
+          schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 1
+        - name: edgaze-event
+          in: header
+          required: true
+          description: Event type carried by the payload, so a receiver can route the delivery before parsing the body.
+          schema:
+            type: string
+            examples:
+              - run.completed
       requestBody:
         content:
           application/json:
@@ -2683,17 +2714,20 @@ webhooks:
       responses:
         "200":
           description: >-
-            Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not
-            retried.
+            Acknowledge receipt. Any 2xx settles the delivery. A 5xx, 408, 425, 429, timeout, or connection error is
+            retried with backoff; any other 4xx or a redirect permanently fails the delivery.
   run.failed:
     post:
       summary: Run reached the failed state.
       description: >-
         Sent once a run terminates unsuccessfully. The payload carries the same buyer-safe `reason` as GET /runs/{id}.
-        Delivery is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no
-        replay: a non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization
-        and reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not
-        guaranteed. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.
+        Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or
+        timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer
+        Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an
+        event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across
+        retries. Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint whose deliveries fail
+        15 times consecutively is paused until it is re-enabled in the developer console. Return 2xx as soon as you have
+        persisted the payload, and do the real work asynchronously.
       parameters:
         - name: edgaze-signature
           in: header
@@ -2717,6 +2751,33 @@ webhooks:
           schema:
             type: string
             format: uuid
+        - name: edgaze-delivery-id
+          in: header
+          required: false
+          description: >-
+            UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication
+            key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again.
+            Absent only on a manual test delivery, which is never retried.
+          schema:
+            type: string
+            format: uuid
+        - name: edgaze-attempt
+          in: header
+          required: true
+          description: 1-indexed attempt number for this delivery. A value above 1 means an earlier attempt did not return 2xx.
+          schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 1
+        - name: edgaze-event
+          in: header
+          required: true
+          description: Event type carried by the payload, so a receiver can route the delivery before parsing the body.
+          schema:
+            type: string
+            examples:
+              - run.completed
       requestBody:
         content:
           application/json:
@@ -2730,17 +2791,20 @@ webhooks:
       responses:
         "200":
           description: >-
-            Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not
-            retried.
+            Acknowledge receipt. Any 2xx settles the delivery. A 5xx, 408, 425, 429, timeout, or connection error is
+            retried with backoff; any other 4xx or a redirect permanently fails the delivery.
   run.cancelled:
     post:
       summary: Run was cancelled.
       description: >-
         Sent after POST /runs/{id}/cancel or a cancellation from the web UI. A cancelled run is never charged. Delivery
-        is a single best-effort attempt per endpoint with a 5 second timeout. There is no retry queue and no replay: a
-        non-2xx, a timeout, or a redirect means the notification is lost, so treat webhooks as an optimization and
-        reconcile anything critical with GET /runs. Endpoints are delivered in parallel and ordering is not guaranteed.
-        Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.
+        is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is
+        retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any
+        other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore
+        arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries. Endpoints
+        are delivered in parallel and ordering is not guaranteed. An endpoint whose deliveries fail 15 times
+        consecutively is paused until it is re-enabled in the developer console. Return 2xx as soon as you have
+        persisted the payload, and do the real work asynchronously.
       parameters:
         - name: edgaze-signature
           in: header
@@ -2764,6 +2828,33 @@ webhooks:
           schema:
             type: string
             format: uuid
+        - name: edgaze-delivery-id
+          in: header
+          required: false
+          description: >-
+            UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication
+            key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again.
+            Absent only on a manual test delivery, which is never retried.
+          schema:
+            type: string
+            format: uuid
+        - name: edgaze-attempt
+          in: header
+          required: true
+          description: 1-indexed attempt number for this delivery. A value above 1 means an earlier attempt did not return 2xx.
+          schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 1
+        - name: edgaze-event
+          in: header
+          required: true
+          description: Event type carried by the payload, so a receiver can route the delivery before parsing the body.
+          schema:
+            type: string
+            examples:
+              - run.completed
       requestBody:
         content:
           application/json:
@@ -2777,18 +2868,15 @@ webhooks:
       responses:
         "200":
           description: >-
-            Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not
-            retried.
+            Acknowledge receipt. Any 2xx settles the delivery. A 5xx, 408, 425, 429, timeout, or connection error is
+            retried with backoff; any other 4xx or a redirect permanently fails the delivery.
   webhook.test:
     post:
       summary: Manual test delivery from the developer console.
       description: >-
         A synthetic payload triggered from the Edgaze dashboard to verify a receiver. It is never produced by a real
-        run, so ignore it in production handlers. Delivery is a single best-effort attempt per endpoint with a 5 second
-        timeout. There is no retry queue and no replay: a non-2xx, a timeout, or a redirect means the notification is
-        lost, so treat webhooks as an optimization and reconcile anything critical with GET /runs. Endpoints are
-        delivered in parallel and ordering is not guaranteed. Return 2xx as soon as you have persisted the payload, and
-        do the real work asynchronously.
+        run, so ignore it in production handlers. Unlike run events, a test delivery is a single attempt: it is never
+        queued and never retried.
       parameters:
         - name: edgaze-signature
           in: header
@@ -2812,6 +2900,33 @@ webhooks:
           schema:
             type: string
             format: uuid
+        - name: edgaze-delivery-id
+          in: header
+          required: false
+          description: >-
+            UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication
+            key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again.
+            Absent only on a manual test delivery, which is never retried.
+          schema:
+            type: string
+            format: uuid
+        - name: edgaze-attempt
+          in: header
+          required: true
+          description: 1-indexed attempt number for this delivery. A value above 1 means an earlier attempt did not return 2xx.
+          schema:
+            type: integer
+            minimum: 1
+            examples:
+              - 1
+        - name: edgaze-event
+          in: header
+          required: true
+          description: Event type carried by the payload, so a receiver can route the delivery before parsing the body.
+          schema:
+            type: string
+            examples:
+              - run.completed
       requestBody:
         content:
           application/json:
@@ -2825,5 +2940,5 @@ webhooks:
       responses:
         "200":
           description: >-
-            Acknowledge receipt. Any 2xx counts as delivered; anything else is recorded as a failed delivery and is not
-            retried.
+            Acknowledge receipt. Any 2xx settles the delivery. A 5xx, 408, 425, 429, timeout, or connection error is
+            retried with backoff; any other 4xx or a redirect permanently fails the delivery.
