@@ -636,34 +636,6 @@ components:
         - value
       additionalProperties: {}
       description: One output produced by the workflow.
-    RunQueue:
-      type: object
-      properties:
-        state:
-          type: string
-          enum:
-            - waiting
-            - starting
-          description: "`waiting`: in line for capacity. `starting`: it just left the line and is being started."
-        position:
-          type: integer
-          minimum: 0
-          description: Place in line, 1 = next. 0 while starting.
-        etaSeconds:
-          anyOf:
-            - type: integer
-              minimum: 1
-            - type: "null"
-          description: Estimated seconds until it starts, or null when unknown.
-      required:
-        - state
-        - position
-        - etaSeconds
-      additionalProperties: false
-      description: >-
-        Edgaze starts runs immediately while it has capacity. At full capacity a run waits in line and starts
-        automatically, in order; nothing is needed from the caller and nothing is charged for waiting. A run that waits
-        past its limit fails with a reason and is not charged.
     Run:
       type: object
       properties:
@@ -719,11 +691,6 @@ components:
             places. Preserve the documented precision and do not round intermediate calculations to two decimal places.
         billingStatus:
           $ref: "#/components/schemas/BillingStatus"
-        queue:
-          anyOf:
-            - $ref: "#/components/schemas/RunQueue"
-            - type: "null"
-          description: Non-null while the run is `pending` because it is waiting for capacity; null otherwise.
         outputs:
           type: array
           items:
@@ -739,7 +706,6 @@ components:
         - completedAt
         - displayedChargeUsd
         - billingStatus
-        - queue
         - outputs
       additionalProperties: false
       description: Response body for GET /runs/{id}.
@@ -846,11 +812,6 @@ components:
           anyOf:
             - type: string
             - type: "null"
-        queue:
-          description: >-
-            Present on `run.queue_position`: the run is waiting for capacity (`state: waiting`, its place in line and an
-            estimated wait) or has just left the line (`state: starting`, position 0).
-          $ref: "#/components/schemas/RunQueue"
       additionalProperties: false
       description: Event-specific content, projected to the fields that are safe for the caller.
     RunEvent:
@@ -861,7 +822,6 @@ components:
             - type: string
               enum:
                 - run.queued
-                - run.queue_position
                 - run.preparing
                 - run.started
                 - run.suspended
