@@ -55,6 +55,11 @@
           "spend_cap_reached",
           "idempotency_conflict",
           "rate_limited",
+          "account_restricted",
+          "integration_connection_required",
+          "creator_listings_paused",
+          "output_too_large",
+          "cancel_unavailable",
           "internal_error"
         ],
         "description": "Stable, machine-friendly error identifier. Branch on this value; the human `message` may change. Two codes are transport-level rather than operation-specific and so are not listed under any single path: `method_not_allowed` (an HTTP method this route does not implement, returned with an `Allow` header) and `invalid_json` (a request body that is not parseable JSON).",
@@ -78,6 +83,33 @@
         "additionalProperties": false,
         "description": "Per-input failure attached to `invalid_inputs` errors."
       },
+      "IntegrationConnectionDetail": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Display name of the service.",
+            "examples": ["GitHub"]
+          },
+          "providerId": {
+            "type": "string",
+            "description": "Stable provider id.",
+            "examples": ["github"]
+          },
+          "makesChanges": {
+            "type": "boolean",
+            "description": "True when the workflow writes to this account, not only reads it."
+          },
+          "connectUrl": {
+            "type": "string",
+            "description": "Where the account owner connects the service in Edgaze, in a browser.",
+            "examples": ["https://www.edgaze.ai/settings#gateway"]
+          }
+        },
+        "required": ["provider", "providerId", "makesChanges", "connectUrl"],
+        "additionalProperties": false,
+        "description": "A third-party account the caller must connect, attached to `integration_connection_required`."
+      },
       "ErrorObject": {
         "type": "object",
         "properties": {
@@ -90,11 +122,21 @@
             "examples": ["Rate limit exceeded. Slow down and retry."]
           },
           "details": {
-            "description": "Present only on `invalid_inputs`; describes each rejected input.",
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ErrorDetail"
-            }
+            "description": "Present only on `invalid_inputs` (each rejected input) and `integration_connection_required` (each account to connect).",
+            "anyOf": [
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ErrorDetail"
+                }
+              },
+              {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/IntegrationConnectionDetail"
+                }
+              }
+            ]
           }
         },
         "required": ["code", "message"],
@@ -2698,7 +2740,7 @@
             }
           },
           "403": {
-            "description": "Not entitled to run this workflow.",
+            "description": "Not entitled to run this workflow (`forbidden`), the account is restricted (`account_restricted`), or the creator's paid listings are paused (`creator_listings_paused`).",
             "headers": {
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
@@ -2766,7 +2808,7 @@
             }
           },
           "409": {
-            "description": "Idempotency key reused with a different request.",
+            "description": "Idempotency key reused with a different request (`idempotency_conflict`), or the workflow needs third-party accounts the caller has not connected (`integration_connection_required`; `error.details` lists them, each with a `connectUrl`).",
             "headers": {
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
@@ -3042,6 +3084,40 @@
               }
             }
           },
+          "413": {
+            "description": "The run's outputs are too large to return in one response.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "output_too_large",
+                        "message": "The run's outputs are too large to return in one response."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
@@ -3084,7 +3160,7 @@
       "post": {
         "operationId": "cancelRun",
         "summary": "Cancel run",
-        "description": "Request cancellation of a run that is still in flight. Idempotent: a run that already reached a terminal state is returned unchanged with `cancelRequested: false`. Cancellation is asynchronous at the worker, but the run is marked `cancelled` before this call returns, and a `run.cancelled` webhook is dispatched. A cancelled run is never charged to the buyer (`billingStatus` settles to `not_charged`). Requires `run:execute`, not `run:read`, because it changes the run's outcome.",
+        "description": "Request cancellation of a run that is still in flight. Idempotent: a run that already reached a terminal state is returned unchanged with `cancelRequested: false`. A run that has not started executing yet is cancelled before this call returns. A run that is executing is stopped asynchronously: the response carries its current status with `cancelRequested: true`, and the run reaches `cancelled` shortly after, with a `run.cancelled` webhook. A cancelled run is never charged to the buyer (`billingStatus` settles to `not_charged`). Requires `run:execute`, not `run:read`, because it changes the run's outcome.",
         "tags": ["Runs"],
         "security": [
           {
@@ -3260,6 +3336,40 @@
                       "error": {
                         "code": "internal_error",
                         "message": "Unexpected server error."
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Cancellation could not be delivered. Safe to retry.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "cancel_unavailable",
+                        "message": "Cancellation could not be delivered. Retry shortly."
                       }
                     }
                   }
