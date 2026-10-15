@@ -792,6 +792,18 @@
         "additionalProperties": {},
         "description": "One output produced by the workflow."
       },
+      "RunOutcome": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": ["completed", "completed_with_issues"]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Set when `status` is `completed`, null otherwise. `completed`: every step finished. `completed_with_issues`: the run returned its outputs but some steps failed; it is charged for the completed steps' compute only, without the creator's price."
+      },
       "RunQueue": {
         "type": "object",
         "properties": {
@@ -908,6 +920,9 @@
           "billingStatus": {
             "$ref": "#/components/schemas/BillingStatus"
           },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
+          },
           "queue": {
             "anyOf": [
               {
@@ -937,6 +952,7 @@
           "completedAt",
           "displayedChargeUsd",
           "billingStatus",
+          "outcome",
           "queue",
           "outputs"
         ],
@@ -1012,6 +1028,9 @@
           },
           "billingStatus": {
             "$ref": "#/components/schemas/BillingStatus"
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
           }
         },
         "required": [
@@ -1022,7 +1041,8 @@
           "startedAt",
           "completedAt",
           "displayedChargeUsd",
-          "billingStatus"
+          "billingStatus",
+          "outcome"
         ],
         "additionalProperties": false,
         "description": "Compact row in the run history. Outputs and failure reasons are omitted here — read GET /runs/{id} for a single run's full detail."
@@ -1352,6 +1372,9 @@
               },
               "status": {
                 "$ref": "#/components/schemas/PublicRunStatus"
+              },
+              "outcome": {
+                "$ref": "#/components/schemas/RunOutcome"
               },
               "displayedChargeUsd": {
                 "anyOf": [
@@ -3631,7 +3654,7 @@
       "get": {
         "operationId": "streamRun",
         "summary": "Stream run",
-        "description": "Server-Sent Events stream of the run's log. Resume with the `Last-Event-ID` header to skip already-received sequences. Each SSE `data:` frame is a `RunEvent` — the `event:` name is the event type (or `run.status` for lifecycle transitions) and `id:` is the `sequence`. Node output arrives as `node.output.delta` frames whose `data.text` you append in order, so this is the endpoint to build a live progress UI on rather than polling.",
+        "description": "Server-Sent Events stream of the run's log. Resume with the `Last-Event-ID` header to skip already-received sequences. Each SSE `data:` frame is a `RunEvent` — the `event:` name is the event type (or `run.status` for lifecycle transitions) and `id:` is the `sequence`. Node output arrives as `node.output.delta` frames whose `data.text` you append in order, so this is the endpoint to build a live progress UI on rather than polling. A connection rolls over about every 5 minutes: it ends with `retry: 1000` and an `event: reconnect` frame whose `id:` is the last sequence it sent; reconnect with that id as `Last-Event-ID` and nothing is lost or repeated.",
         "tags": ["Runs"],
         "security": [
           {
