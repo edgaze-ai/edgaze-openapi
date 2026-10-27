@@ -75,6 +75,32 @@ components:
         - message
       additionalProperties: false
       description: Per-input failure attached to `invalid_inputs` errors.
+    ErrorObject:
+      type: object
+      properties:
+        code:
+          $ref: "#/components/schemas/ErrorCode"
+        message:
+          type: string
+          description: Human-readable failure reason. Do not parse; branch on `code` instead.
+          examples:
+            - Rate limit exceeded. Slow down and retry.
+        details:
+          description: >-
+            Present only on `invalid_inputs` (each rejected input) and `integration_connection_required` (each account
+            to connect).
+          anyOf:
+            - type: array
+              items:
+                $ref: "#/components/schemas/ErrorDetail"
+            - type: array
+              items:
+                $ref: "#/components/schemas/IntegrationConnectionDetail"
+      required:
+        - code
+        - message
+      additionalProperties: false
+      description: Inner error body carried by every failure response.
     IntegrationConnectionDetail:
       type: object
       properties:
@@ -103,32 +129,6 @@ components:
         - connectUrl
       additionalProperties: false
       description: A third-party account the caller must connect, attached to `integration_connection_required`.
-    ErrorObject:
-      type: object
-      properties:
-        code:
-          $ref: "#/components/schemas/ErrorCode"
-        message:
-          type: string
-          description: Human-readable failure reason. Do not parse; branch on `code` instead.
-          examples:
-            - Rate limit exceeded. Slow down and retry.
-        details:
-          description: >-
-            Present only on `invalid_inputs` (each rejected input) and `integration_connection_required` (each account
-            to connect).
-          anyOf:
-            - type: array
-              items:
-                $ref: "#/components/schemas/ErrorDetail"
-            - type: array
-              items:
-                $ref: "#/components/schemas/IntegrationConnectionDetail"
-      required:
-        - code
-        - message
-      additionalProperties: false
-      description: Inner error body carried by every failure response.
     ErrorEnvelope:
       type: object
       properties:
@@ -236,34 +236,34 @@ components:
         name:
           type: string
         description:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         ownerHandle:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         edgazeCode:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         runModel:
           $ref: "#/components/schemas/RunModel"
         displayedRunPriceUsd:
-          anyOf:
-            - type: number
-            - type: "null"
           description: >-
             Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ
             slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the
             documented precision and do not round intermediate calculations to two decimal places.
+          type:
+            - number
+            - "null"
         pricingExplanation:
-          anyOf:
-            - type: string
-            - type: "null"
           description: >-
             Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive
             estimate; explains that settlement uses the live quote at run start.
+          type:
+            - string
+            - "null"
         userAccess:
           $ref: "#/components/schemas/UserAccess"
         accessLabel:
@@ -455,34 +455,34 @@ components:
         name:
           type: string
         description:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         ownerHandle:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         edgazeCode:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         runModel:
           $ref: "#/components/schemas/RunModel"
         displayedRunPriceUsd:
-          anyOf:
-            - type: number
-            - type: "null"
           description: >-
             Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ
             slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the
             documented precision and do not round intermediate calculations to two decimal places.
+          type:
+            - number
+            - "null"
         pricingExplanation:
-          anyOf:
-            - type: string
-            - type: "null"
           description: >-
             Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive
             estimate; explains that settlement uses the live quote at run start.
+          type:
+            - string
+            - "null"
         userAccess:
           $ref: "#/components/schemas/UserAccess"
         accessLabel:
@@ -512,9 +512,9 @@ components:
               format: uuid
             - type: "null"
         versionLabel:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         pinnedVersionId:
           anyOf:
             - type: string
@@ -614,6 +614,15 @@ components:
           minLength: 1
           format: uuid
       description: Request body for POST /runs.
+    CreateRunResponse:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/AcceptedRun"
+      required:
+        - run
+      additionalProperties: false
+      description: Response body for POST /runs (202 Accepted).
     AcceptedRun:
       type: object
       properties:
@@ -649,15 +658,6 @@ components:
         - streamUrl
       additionalProperties: false
       description: The `run` sub-object returned by POST /runs (202 Accepted).
-    CreateRunResponse:
-      type: object
-      properties:
-        run:
-          $ref: "#/components/schemas/AcceptedRun"
-      required:
-        - run
-      additionalProperties: false
-      description: Response body for POST /runs (202 Accepted).
     RunOutputField:
       type: object
       properties:
@@ -675,6 +675,88 @@ components:
         - value
       additionalProperties: {}
       description: One output produced by the workflow.
+    Run:
+      type: object
+      properties:
+        id:
+          type: string
+          minLength: 1
+          format: uuid
+        status:
+          $ref: "#/components/schemas/PublicRunStatus"
+        reason:
+          description: >-
+            Buyer-safe failure explanation. Non-null only when `status` is `failed`; provider-specific detail is
+            deliberately generalized.
+          type:
+            - string
+            - "null"
+        suspended:
+          type: boolean
+          description: >-
+            True exactly when `status` is `suspended`; kept as a separate flag so a caller can test for 'waiting'
+            without matching on the status enum. A run suspends for one of two reasons, reported as `reason` on the
+            `run.suspended` event: `wait_timer` (a delay node) resumes itself when the timer fires, while `wait_signal`
+            (the workflow needs credentials) waits for the buyer to supply them on the web run page. The API cannot
+            resume a run; POST /runs/{id}/cancel is the only way for an API caller to end one early.
+        workflowId:
+          anyOf:
+            - type: string
+              minLength: 1
+              format: uuid
+            - type: "null"
+        workflowVersionId:
+          anyOf:
+            - type: string
+              minLength: 1
+              format: uuid
+            - type: "null"
+        startedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        completedAt:
+          anyOf:
+            - type: string
+              format: date-time
+            - type: "null"
+        displayedChargeUsd:
+          description: >-
+            Buyer-facing charge. `null` until the run settles. USD amount as a JSON number with up to six decimal
+            places. Preserve the documented precision and do not round intermediate calculations to two decimal places.
+          type:
+            - number
+            - "null"
+        billingStatus:
+          $ref: "#/components/schemas/BillingStatus"
+        outcome:
+          $ref: "#/components/schemas/RunOutcome"
+        queue:
+          anyOf:
+            - $ref: "#/components/schemas/RunQueue"
+            - type: "null"
+          description: Non-null while the run is `pending` because it is waiting for capacity; null otherwise.
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/RunOutputField"
+      required:
+        - id
+        - status
+        - reason
+        - suspended
+        - workflowId
+        - workflowVersionId
+        - startedAt
+        - completedAt
+        - displayedChargeUsd
+        - billingStatus
+        - outcome
+        - queue
+        - outputs
+      additionalProperties: false
+      description: Response body for GET /runs/{id}.
     RunOutcome:
       anyOf:
         - type: string
@@ -714,88 +796,6 @@ components:
         Edgaze starts runs immediately while it has capacity. At full capacity a run waits in line and starts
         automatically, in order; nothing is needed from the caller and nothing is charged for waiting. A run that waits
         past its limit fails with a reason and is not charged.
-    Run:
-      type: object
-      properties:
-        id:
-          type: string
-          minLength: 1
-          format: uuid
-        status:
-          $ref: "#/components/schemas/PublicRunStatus"
-        reason:
-          anyOf:
-            - type: string
-            - type: "null"
-          description: >-
-            Buyer-safe failure explanation. Non-null only when `status` is `failed`; provider-specific detail is
-            deliberately generalized.
-        suspended:
-          type: boolean
-          description: >-
-            True exactly when `status` is `suspended`; kept as a separate flag so a caller can test for 'waiting'
-            without matching on the status enum. A run suspends for one of two reasons, reported as `reason` on the
-            `run.suspended` event: `wait_timer` (a delay node) resumes itself when the timer fires, while `wait_signal`
-            (the workflow needs credentials) waits for the buyer to supply them on the web run page. The API cannot
-            resume a run; POST /runs/{id}/cancel is the only way for an API caller to end one early.
-        workflowId:
-          anyOf:
-            - type: string
-              minLength: 1
-              format: uuid
-            - type: "null"
-        workflowVersionId:
-          anyOf:
-            - type: string
-              minLength: 1
-              format: uuid
-            - type: "null"
-        startedAt:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: "null"
-        completedAt:
-          anyOf:
-            - type: string
-              format: date-time
-            - type: "null"
-        displayedChargeUsd:
-          anyOf:
-            - type: number
-            - type: "null"
-          description: >-
-            Buyer-facing charge. `null` until the run settles. USD amount as a JSON number with up to six decimal
-            places. Preserve the documented precision and do not round intermediate calculations to two decimal places.
-        billingStatus:
-          $ref: "#/components/schemas/BillingStatus"
-        outcome:
-          $ref: "#/components/schemas/RunOutcome"
-        queue:
-          anyOf:
-            - $ref: "#/components/schemas/RunQueue"
-            - type: "null"
-          description: Non-null while the run is `pending` because it is waiting for capacity; null otherwise.
-        outputs:
-          type: array
-          items:
-            $ref: "#/components/schemas/RunOutputField"
-      required:
-        - id
-        - status
-        - reason
-        - suspended
-        - workflowId
-        - workflowVersionId
-        - startedAt
-        - completedAt
-        - displayedChargeUsd
-        - billingStatus
-        - outcome
-        - queue
-        - outputs
-      additionalProperties: false
-      description: Response body for GET /runs/{id}.
     RunListItem:
       type: object
       properties:
@@ -828,9 +828,9 @@ components:
               format: date-time
             - type: "null"
         displayedChargeUsd:
-          anyOf:
-            - type: number
-            - type: "null"
+          type:
+            - number
+            - "null"
         billingStatus:
           $ref: "#/components/schemas/BillingStatus"
         outcome:
@@ -899,9 +899,9 @@ components:
           $ref: "#/components/schemas/PublicRunStatus"
         reason:
           description: Why the run failed, suspended, or a node was skipped. Sanitized to the same buyer-safe text as `Run.reason`.
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         queue:
           description: >-
             Present on `run.queue_position`: the run is waiting for capacity (`state: waiting`, its place in line and an
@@ -944,10 +944,10 @@ components:
           type: string
           format: date-time
         nodeId:
-          anyOf:
-            - type: string
-            - type: "null"
           description: Workflow node this event belongs to, or `null` for run-level events.
+          type:
+            - string
+            - "null"
         attempt:
           anyOf:
             - type: integer
@@ -1005,9 +1005,9 @@ components:
           type: string
           format: date-time
         releaseNotes:
-          anyOf:
-            - type: string
-            - type: "null"
+          type:
+            - string
+            - "null"
         isActive:
           type: boolean
         isPurchased:
@@ -1108,9 +1108,9 @@ components:
             outcome:
               $ref: "#/components/schemas/RunOutcome"
             displayedChargeUsd:
-              anyOf:
-                - type: number
-                - type: "null"
+              type:
+                - number
+                - "null"
           required:
             - runId
             - workflowId
@@ -1148,6 +1148,76 @@ components:
         - data
       additionalProperties: false
       description: Body posted when a receiver clicks Send test in the developer console.
+    ListWorkflowsQuery:
+      type: object
+      properties:
+        scope:
+          description: Marketplace catalog or the key holder's current workflows. Defaults to `marketplace`.
+          type: string
+          enum:
+            - marketplace
+            - mine
+        q:
+          description: Search title, description, tags, owner handle, or Edgaze Code.
+          type: string
+        offset:
+          description: Pagination offset; used with `marketplace` scope.
+          type: integer
+          minimum: 0
+        limit:
+          description: Page size (max 50). Defaults to 24.
+          type: integer
+          minimum: 1
+          maximum: 50
+        sort:
+          description: Marketplace sort order. Defaults to `popular`.
+          type: string
+          enum:
+            - popular
+            - newest
+        runModel:
+          description: Filter by pricing model.
+          $ref: "#/components/schemas/RunModel"
+        runnableOnly:
+          description: When `true`, only workflows the key holder can run right now.
+          type: string
+          enum:
+            - "true"
+            - "false"
+      description: Query parameters accepted by GET /workflows.
+    ListRunsQuery:
+      type: object
+      properties:
+        status:
+          description: Return only runs currently in this status.
+          $ref: "#/components/schemas/RunListStatus"
+        workflow:
+          description: Return only runs of this workflow.
+          type: string
+          minLength: 1
+          format: uuid
+        offset:
+          description: Pagination offset. Defaults to 0.
+          type: integer
+          minimum: 0
+        limit:
+          description: Page size (max 50). Defaults to 24.
+          type: integer
+          minimum: 1
+          maximum: 50
+      description: Query parameters accepted by GET /runs.
+    WorkflowIdParam:
+      type: string
+      minLength: 1
+      description: UUID of the workflow.
+      examples:
+        - 550e8400-e29b-41d4-a716-446655440000
+    RunIdParam:
+      type: string
+      minLength: 1
+      description: UUID returned from POST /runs.
+      examples:
+        - 7c9e6679-7425-40de-944b-e07fc1f90ae7
 paths:
   /workflows:
     get:
@@ -1168,56 +1238,37 @@ paths:
           in: query
           required: false
           schema:
-            description: Marketplace catalog or the key holder's current workflows. Defaults to `marketplace`.
             type: string
-            enum:
-              - marketplace
-              - mine
         - name: q
           in: query
           required: false
           schema:
-            description: Search title, description, tags, owner handle, or Edgaze Code.
             type: string
         - name: offset
           in: query
           required: false
           schema:
-            description: Pagination offset; used with `marketplace` scope.
-            type: integer
-            minimum: 0
+            type: string
         - name: limit
           in: query
           required: false
           schema:
-            description: Page size (max 50). Defaults to 24.
-            type: integer
-            minimum: 1
-            maximum: 50
+            type: string
         - name: sort
           in: query
           required: false
           schema:
-            description: Marketplace sort order. Defaults to `popular`.
             type: string
-            enum:
-              - popular
-              - newest
         - name: runModel
           in: query
           required: false
           schema:
-            description: Filter by pricing model.
-            $ref: "#/components/schemas/RunModel"
+            type: string
         - name: runnableOnly
           in: query
           required: false
           schema:
-            description: When `true`, only workflows the key holder can run right now.
             type: string
-            enum:
-              - "true"
-              - "false"
       responses:
         "200":
           description: Paginated workflow catalog.
@@ -1339,11 +1390,7 @@ paths:
           required: true
           description: UUID of the workflow.
           schema:
-            type: string
-            minLength: 1
-            description: UUID of the workflow.
-            examples:
-              - 550e8400-e29b-41d4-a716-446655440000
+            $ref: "#/components/schemas/WorkflowIdParam"
       responses:
         "200":
           description: Workflow detail.
@@ -1488,11 +1535,7 @@ paths:
           required: true
           description: UUID of the workflow.
           schema:
-            type: string
-            minLength: 1
-            description: UUID of the workflow.
-            examples:
-              - 550e8400-e29b-41d4-a716-446655440000
+            $ref: "#/components/schemas/WorkflowIdParam"
       responses:
         "200":
           description: Entitled workflow versions.
@@ -1635,11 +1678,7 @@ paths:
           required: true
           description: UUID of the workflow.
           schema:
-            type: string
-            minLength: 1
-            description: UUID of the workflow.
-            examples:
-              - 550e8400-e29b-41d4-a716-446655440000
+            $ref: "#/components/schemas/WorkflowIdParam"
       responses:
         "200":
           description: Purchase pin updated.
@@ -1794,34 +1833,25 @@ paths:
           required: false
           description: Return only runs currently in this status.
           schema:
-            description: Return only runs currently in this status.
-            $ref: "#/components/schemas/RunListStatus"
+            type: string
         - name: workflow
           in: query
           required: false
           description: Return only runs of this workflow id.
           schema:
-            description: Return only runs of this workflow.
             type: string
-            minLength: 1
-            format: uuid
         - name: offset
           in: query
           required: false
           description: Pagination offset. Defaults to 0.
           schema:
-            description: Pagination offset. Defaults to 0.
-            type: integer
-            minimum: 0
+            type: string
         - name: limit
           in: query
           required: false
           description: Page size from 1 to 50. Defaults to 24.
           schema:
-            description: Page size (max 50). Defaults to 24.
-            type: integer
-            minimum: 1
-            maximum: 50
+            type: string
       responses:
         "200":
           description: Paginated run history.
@@ -2194,11 +2224,7 @@ paths:
           required: true
           description: UUID returned from POST /runs.
           schema:
-            type: string
-            minLength: 1
-            description: UUID returned from POST /runs.
-            examples:
-              - 7c9e6679-7425-40de-944b-e07fc1f90ae7
+            $ref: "#/components/schemas/RunIdParam"
       responses:
         "200":
           description: Run detail.
@@ -2344,11 +2370,7 @@ paths:
           required: true
           description: UUID returned from POST /runs.
           schema:
-            type: string
-            minLength: 1
-            description: UUID returned from POST /runs.
-            examples:
-              - 7c9e6679-7425-40de-944b-e07fc1f90ae7
+            $ref: "#/components/schemas/RunIdParam"
       responses:
         "200":
           description: Cancellation recorded.
@@ -2495,11 +2517,7 @@ paths:
           required: true
           description: UUID returned from POST /runs.
           schema:
-            type: string
-            minLength: 1
-            description: UUID returned from POST /runs.
-            examples:
-              - 7c9e6679-7425-40de-944b-e07fc1f90ae7
+            $ref: "#/components/schemas/RunIdParam"
         - name: afterSequence
           in: query
           required: false
@@ -2660,11 +2678,7 @@ paths:
           required: true
           description: UUID returned from POST /runs.
           schema:
-            type: string
-            minLength: 1
-            description: UUID returned from POST /runs.
-            examples:
-              - 7c9e6679-7425-40de-944b-e07fc1f90ae7
+            $ref: "#/components/schemas/RunIdParam"
         - name: Last-Event-ID
           in: header
           required: false

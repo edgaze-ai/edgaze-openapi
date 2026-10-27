@@ -83,33 +83,6 @@
         "additionalProperties": false,
         "description": "Per-input failure attached to `invalid_inputs` errors."
       },
-      "IntegrationConnectionDetail": {
-        "type": "object",
-        "properties": {
-          "provider": {
-            "type": "string",
-            "description": "Display name of the service.",
-            "examples": ["GitHub"]
-          },
-          "providerId": {
-            "type": "string",
-            "description": "Stable provider id.",
-            "examples": ["github"]
-          },
-          "makesChanges": {
-            "type": "boolean",
-            "description": "True when the workflow writes to this account, not only reads it."
-          },
-          "connectUrl": {
-            "type": "string",
-            "description": "Where the account owner connects the service in Edgaze, in a browser.",
-            "examples": ["https://www.edgaze.ai/settings#gateway"]
-          }
-        },
-        "required": ["provider", "providerId", "makesChanges", "connectUrl"],
-        "additionalProperties": false,
-        "description": "A third-party account the caller must connect, attached to `integration_connection_required`."
-      },
       "ErrorObject": {
         "type": "object",
         "properties": {
@@ -142,6 +115,33 @@
         "required": ["code", "message"],
         "additionalProperties": false,
         "description": "Inner error body carried by every failure response."
+      },
+      "IntegrationConnectionDetail": {
+        "type": "object",
+        "properties": {
+          "provider": {
+            "type": "string",
+            "description": "Display name of the service.",
+            "examples": ["GitHub"]
+          },
+          "providerId": {
+            "type": "string",
+            "description": "Stable provider id.",
+            "examples": ["github"]
+          },
+          "makesChanges": {
+            "type": "boolean",
+            "description": "True when the workflow writes to this account, not only reads it."
+          },
+          "connectUrl": {
+            "type": "string",
+            "description": "Where the account owner connects the service in Edgaze, in a browser.",
+            "examples": ["https://www.edgaze.ai/settings#gateway"]
+          }
+        },
+        "required": ["provider", "providerId", "makesChanges", "connectUrl"],
+        "additionalProperties": false,
+        "description": "A third-party account the caller must connect, attached to `integration_connection_required`."
       },
       "ErrorEnvelope": {
         "type": "object",
@@ -232,59 +232,24 @@
             "type": "string"
           },
           "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "ownerHandle": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "edgazeCode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "runModel": {
             "$ref": "#/components/schemas/RunModel"
           },
           "displayedRunPriceUsd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places."
+            "description": "Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places.",
+            "type": ["number", "null"]
           },
           "pricingExplanation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive estimate; explains that settlement uses the live quote at run start."
+            "description": "Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive estimate; explains that settlement uses the live quote at run start.",
+            "type": ["string", "null"]
           },
           "userAccess": {
             "$ref": "#/components/schemas/UserAccess"
@@ -504,59 +469,24 @@
             "type": "string"
           },
           "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "ownerHandle": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "edgazeCode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "runModel": {
             "$ref": "#/components/schemas/RunModel"
           },
           "displayedRunPriceUsd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places."
+            "description": "Estimated run price shown to the buyer. The final price is confirmed when the run starts and may differ slightly from older catalog data. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places.",
+            "type": ["number", "null"]
           },
           "pricingExplanation": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive estimate; explains that settlement uses the live quote at run start."
+            "description": "Human-readable note on how this listing is priced. Present whenever `displayedRunPriceUsd` is a positive estimate; explains that settlement uses the live quote at run start.",
+            "type": ["string", "null"]
           },
           "userAccess": {
             "$ref": "#/components/schemas/UserAccess"
@@ -604,14 +534,7 @@
             ]
           },
           "versionLabel": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "pinnedVersionId": {
             "anyOf": [
@@ -729,6 +652,17 @@
         },
         "description": "Request body for POST /runs."
       },
+      "CreateRunResponse": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/AcceptedRun"
+          }
+        },
+        "required": ["run"],
+        "additionalProperties": false,
+        "description": "Response body for POST /runs (202 Accepted)."
+      },
       "AcceptedRun": {
         "type": "object",
         "properties": {
@@ -763,17 +697,6 @@
         "additionalProperties": false,
         "description": "The `run` sub-object returned by POST /runs (202 Accepted)."
       },
-      "CreateRunResponse": {
-        "type": "object",
-        "properties": {
-          "run": {
-            "$ref": "#/components/schemas/AcceptedRun"
-          }
-        },
-        "required": ["run"],
-        "additionalProperties": false,
-        "description": "Response body for POST /runs (202 Accepted)."
-      },
       "RunOutputField": {
         "type": "object",
         "properties": {
@@ -792,48 +715,6 @@
         "additionalProperties": {},
         "description": "One output produced by the workflow."
       },
-      "RunOutcome": {
-        "anyOf": [
-          {
-            "type": "string",
-            "enum": ["completed", "completed_with_issues"]
-          },
-          {
-            "type": "null"
-          }
-        ],
-        "description": "Set when `status` is `completed`, null otherwise. `completed`: every step finished. `completed_with_issues`: the run returned its outputs but some steps failed; it is charged for the completed steps' compute only, without the creator's price."
-      },
-      "RunQueue": {
-        "type": "object",
-        "properties": {
-          "state": {
-            "type": "string",
-            "enum": ["waiting", "starting"],
-            "description": "`waiting`: in line for capacity. `starting`: it just left the line and is being started."
-          },
-          "position": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "Place in line, 1 = next. 0 while starting."
-          },
-          "etaSeconds": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Estimated seconds until it starts, or null when unknown."
-          }
-        },
-        "required": ["state", "position", "etaSeconds"],
-        "additionalProperties": false,
-        "description": "Edgaze starts runs immediately while it has capacity. At full capacity a run waits in line and starts automatically, in order; nothing is needed from the caller and nothing is charged for waiting. A run that waits past its limit fails with a reason and is not charged."
-      },
       "Run": {
         "type": "object",
         "properties": {
@@ -846,15 +727,8 @@
             "$ref": "#/components/schemas/PublicRunStatus"
           },
           "reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Buyer-safe failure explanation. Non-null only when `status` is `failed`; provider-specific detail is deliberately generalized."
+            "description": "Buyer-safe failure explanation. Non-null only when `status` is `failed`; provider-specific detail is deliberately generalized.",
+            "type": ["string", "null"]
           },
           "suspended": {
             "type": "boolean",
@@ -907,15 +781,8 @@
             ]
           },
           "displayedChargeUsd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Buyer-facing charge. `null` until the run settles. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places."
+            "description": "Buyer-facing charge. `null` until the run settles. USD amount as a JSON number with up to six decimal places. Preserve the documented precision and do not round intermediate calculations to two decimal places.",
+            "type": ["number", "null"]
           },
           "billingStatus": {
             "$ref": "#/components/schemas/BillingStatus"
@@ -958,6 +825,48 @@
         ],
         "additionalProperties": false,
         "description": "Response body for GET /runs/{id}."
+      },
+      "RunOutcome": {
+        "anyOf": [
+          {
+            "type": "string",
+            "enum": ["completed", "completed_with_issues"]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "description": "Set when `status` is `completed`, null otherwise. `completed`: every step finished. `completed_with_issues`: the run returned its outputs but some steps failed; it is charged for the completed steps' compute only, without the creator's price."
+      },
+      "RunQueue": {
+        "type": "object",
+        "properties": {
+          "state": {
+            "type": "string",
+            "enum": ["waiting", "starting"],
+            "description": "`waiting`: in line for capacity. `starting`: it just left the line and is being started."
+          },
+          "position": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Place in line, 1 = next. 0 while starting."
+          },
+          "etaSeconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Estimated seconds until it starts, or null when unknown."
+          }
+        },
+        "required": ["state", "position", "etaSeconds"],
+        "additionalProperties": false,
+        "description": "Edgaze starts runs immediately while it has capacity. At full capacity a run waits in line and starts automatically, in order; nothing is needed from the caller and nothing is charged for waiting. A run that waits past its limit fails with a reason and is not charged."
       },
       "RunListItem": {
         "type": "object",
@@ -1017,14 +926,7 @@
             ]
           },
           "displayedChargeUsd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["number", "null"]
           },
           "billingStatus": {
             "$ref": "#/components/schemas/BillingStatus"
@@ -1098,14 +1000,7 @@
           },
           "reason": {
             "description": "Why the run failed, suspended, or a node was skipped. Sanitized to the same buyer-safe text as `Run.reason`.",
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "queue": {
             "description": "Present on `run.queue_position`: the run is waiting for capacity (`state: waiting`, its place in line and an estimated wait) or has just left the line (`state: starting`, position 0).",
@@ -1156,15 +1051,8 @@
             "format": "date-time"
           },
           "nodeId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Workflow node this event belongs to, or `null` for run-level events."
+            "description": "Workflow node this event belongs to, or `null` for run-level events.",
+            "type": ["string", "null"]
           },
           "attempt": {
             "anyOf": [
@@ -1241,14 +1129,7 @@
             "format": "date-time"
           },
           "releaseNotes": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": ["string", "null"]
           },
           "isActive": {
             "type": "boolean"
@@ -1377,14 +1258,7 @@
                 "$ref": "#/components/schemas/RunOutcome"
               },
               "displayedChargeUsd": {
-                "anyOf": [
-                  {
-                    "type": "number"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
+                "type": ["number", "null"]
               }
             },
             "required": ["runId", "workflowId", "status"],
@@ -1422,6 +1296,85 @@
         "required": ["id", "type", "createdAt", "data"],
         "additionalProperties": false,
         "description": "Body posted when a receiver clicks Send test in the developer console."
+      },
+      "ListWorkflowsQuery": {
+        "type": "object",
+        "properties": {
+          "scope": {
+            "description": "Marketplace catalog or the key holder's current workflows. Defaults to `marketplace`.",
+            "type": "string",
+            "enum": ["marketplace", "mine"]
+          },
+          "q": {
+            "description": "Search title, description, tags, owner handle, or Edgaze Code.",
+            "type": "string"
+          },
+          "offset": {
+            "description": "Pagination offset; used with `marketplace` scope.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "description": "Page size (max 50). Defaults to 24.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          },
+          "sort": {
+            "description": "Marketplace sort order. Defaults to `popular`.",
+            "type": "string",
+            "enum": ["popular", "newest"]
+          },
+          "runModel": {
+            "description": "Filter by pricing model.",
+            "$ref": "#/components/schemas/RunModel"
+          },
+          "runnableOnly": {
+            "description": "When `true`, only workflows the key holder can run right now.",
+            "type": "string",
+            "enum": ["true", "false"]
+          }
+        },
+        "description": "Query parameters accepted by GET /workflows."
+      },
+      "ListRunsQuery": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "description": "Return only runs currently in this status.",
+            "$ref": "#/components/schemas/RunListStatus"
+          },
+          "workflow": {
+            "description": "Return only runs of this workflow.",
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "offset": {
+            "description": "Pagination offset. Defaults to 0.",
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "description": "Page size (max 50). Defaults to 24.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50
+          }
+        },
+        "description": "Query parameters accepted by GET /runs."
+      },
+      "WorkflowIdParam": {
+        "type": "string",
+        "minLength": 1,
+        "description": "UUID of the workflow.",
+        "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+      },
+      "RunIdParam": {
+        "type": "string",
+        "minLength": 1,
+        "description": "UUID returned from POST /runs.",
+        "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
       }
     }
   },
@@ -1444,9 +1397,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "Marketplace catalog or the key holder's current workflows. Defaults to `marketplace`.",
-              "type": "string",
-              "enum": ["marketplace", "mine"]
+              "type": "string"
             }
           },
           {
@@ -1454,7 +1405,6 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "Search title, description, tags, owner handle, or Edgaze Code.",
               "type": "string"
             }
           },
@@ -1463,9 +1413,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "Pagination offset; used with `marketplace` scope.",
-              "type": "integer",
-              "minimum": 0
+              "type": "string"
             }
           },
           {
@@ -1473,10 +1421,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "Page size (max 50). Defaults to 24.",
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50
+              "type": "string"
             }
           },
           {
@@ -1484,9 +1429,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "Marketplace sort order. Defaults to `popular`.",
-              "type": "string",
-              "enum": ["popular", "newest"]
+              "type": "string"
             }
           },
           {
@@ -1494,8 +1437,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "Filter by pricing model.",
-              "$ref": "#/components/schemas/RunModel"
+              "type": "string"
             }
           },
           {
@@ -1503,9 +1445,7 @@
             "in": "query",
             "required": false,
             "schema": {
-              "description": "When `true`, only workflows the key holder can run right now.",
-              "type": "string",
-              "enum": ["true", "false"]
+              "type": "string"
             }
           }
         ],
@@ -1693,10 +1633,7 @@
             "required": true,
             "description": "UUID of the workflow.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID of the workflow.",
-              "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+              "$ref": "#/components/schemas/WorkflowIdParam"
             }
           }
         ],
@@ -1918,10 +1855,7 @@
             "required": true,
             "description": "UUID of the workflow.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID of the workflow.",
-              "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+              "$ref": "#/components/schemas/WorkflowIdParam"
             }
           }
         ],
@@ -2143,10 +2077,7 @@
             "required": true,
             "description": "UUID of the workflow.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID of the workflow.",
-              "examples": ["550e8400-e29b-41d4-a716-446655440000"]
+              "$ref": "#/components/schemas/WorkflowIdParam"
             }
           }
         ],
@@ -2376,8 +2307,7 @@
             "required": false,
             "description": "Return only runs currently in this status.",
             "schema": {
-              "description": "Return only runs currently in this status.",
-              "$ref": "#/components/schemas/RunListStatus"
+              "type": "string"
             }
           },
           {
@@ -2386,10 +2316,7 @@
             "required": false,
             "description": "Return only runs of this workflow id.",
             "schema": {
-              "description": "Return only runs of this workflow.",
-              "type": "string",
-              "minLength": 1,
-              "format": "uuid"
+              "type": "string"
             }
           },
           {
@@ -2398,9 +2325,7 @@
             "required": false,
             "description": "Pagination offset. Defaults to 0.",
             "schema": {
-              "description": "Pagination offset. Defaults to 0.",
-              "type": "integer",
-              "minimum": 0
+              "type": "string"
             }
           },
           {
@@ -2409,10 +2334,7 @@
             "required": false,
             "description": "Page size from 1 to 50. Defaults to 24.",
             "schema": {
-              "description": "Page size (max 50). Defaults to 24.",
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50
+              "type": "string"
             }
           }
         ],
@@ -2973,10 +2895,7 @@
             "required": true,
             "description": "UUID returned from POST /runs.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID returned from POST /runs.",
-              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+              "$ref": "#/components/schemas/RunIdParam"
             }
           }
         ],
@@ -3198,10 +3117,7 @@
             "required": true,
             "description": "UUID returned from POST /runs.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID returned from POST /runs.",
-              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+              "$ref": "#/components/schemas/RunIdParam"
             }
           }
         ],
@@ -3423,10 +3339,7 @@
             "required": true,
             "description": "UUID returned from POST /runs.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID returned from POST /runs.",
-              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+              "$ref": "#/components/schemas/RunIdParam"
             }
           },
           {
@@ -3669,10 +3582,7 @@
             "required": true,
             "description": "UUID returned from POST /runs.",
             "schema": {
-              "type": "string",
-              "minLength": 1,
-              "description": "UUID returned from POST /runs.",
-              "examples": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
+              "$ref": "#/components/schemas/RunIdParam"
             }
           },
           {
