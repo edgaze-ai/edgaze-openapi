@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Edgaze API",
-    "version": "1.0.0",
-    "description": "Public REST API for running Edgaze workflows programmatically. Every response uses the same envelope: success returns the payload directly; failure returns `{ error: { code, message, details? } }`.",
+    "version": "1.1.0",
+    "description": "Public REST API for running Edgaze workflows programmatically. Every response uses the same envelope: success returns the payload directly; failure returns `{ error: { code, message, details? } }`. Versioning: within /v1 only additive changes are made (new endpoints, optional parameters, response fields, and values in open sets such as event types and error codes), so ignore what you do not recognize. Breaking changes are not made within v1. Deprecations are marked `deprecated: true` and announced with `Deprecation` and `Link: rel=\"deprecation\"` response headers; deprecated v1 features keep working while v1 is served. `info.version` is semver: minor for additions, patch for document fixes. Policy: https://www.edgaze.ai/docs/api/versioning",
     "contact": {
       "name": "Edgaze",
       "url": "https://edgaze.ai/docs/api"
@@ -80,14 +80,14 @@
           }
         },
         "required": ["input", "message"],
-        "additionalProperties": false,
         "description": "Per-input failure attached to `invalid_inputs` errors."
       },
-      "ErrorObject": {
+      "InvalidInputsError": {
         "type": "object",
         "properties": {
           "code": {
-            "$ref": "#/components/schemas/ErrorCode"
+            "type": "string",
+            "const": "invalid_inputs"
           },
           "message": {
             "type": "string",
@@ -95,26 +95,39 @@
             "examples": ["Rate limit exceeded. Slow down and retry."]
           },
           "details": {
-            "description": "Present only on `invalid_inputs` (each rejected input) and `integration_connection_required` (each account to connect).",
-            "anyOf": [
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/ErrorDetail"
-                }
-              },
-              {
-                "type": "array",
-                "items": {
-                  "$ref": "#/components/schemas/IntegrationConnectionDetail"
-                }
-              }
-            ]
+            "description": "Each rejected input. Absent when the request was rejected as a whole (for example `inputs` was not an object).",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ErrorDetail"
+            }
           }
         },
         "required": ["code", "message"],
-        "additionalProperties": false,
-        "description": "Inner error body carried by every failure response."
+        "description": "Inner error body for `invalid_inputs`."
+      },
+      "IntegrationConnectionRequiredError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "integration_connection_required"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable failure reason. Do not parse; branch on `code` instead.",
+            "examples": ["Rate limit exceeded. Slow down and retry."]
+          },
+          "details": {
+            "minItems": 1,
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IntegrationConnectionDetail"
+            },
+            "description": "Each account the caller must connect before the workflow can run."
+          }
+        },
+        "required": ["code", "message", "details"],
+        "description": "Inner error body for `integration_connection_required`."
       },
       "IntegrationConnectionDetail": {
         "type": "object",
@@ -140,8 +153,59 @@
           }
         },
         "required": ["provider", "providerId", "makesChanges", "connectUrl"],
-        "additionalProperties": false,
         "description": "A third-party account the caller must connect, attached to `integration_connection_required`."
+      },
+      "PlainError": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "unauthorized",
+              "insufficient_scope",
+              "forbidden",
+              "not_found",
+              "invalid_request",
+              "invalid_json",
+              "missing_workflow",
+              "invalid_cursor",
+              "method_not_allowed",
+              "spend_cap_reached",
+              "idempotency_conflict",
+              "rate_limited",
+              "account_restricted",
+              "creator_listings_paused",
+              "output_too_large",
+              "cancel_unavailable",
+              "internal_error"
+            ],
+            "description": "Any code other than `invalid_inputs` and `integration_connection_required`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable failure reason. Do not parse; branch on `code` instead.",
+            "examples": ["Rate limit exceeded. Slow down and retry."]
+          }
+        },
+        "required": ["code", "message"],
+        "description": "Inner error body for codes that carry no `details`."
+      },
+      "ErrorObject": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/InvalidInputsError"
+          },
+          {
+            "$ref": "#/components/schemas/IntegrationConnectionRequiredError"
+          },
+          {
+            "$ref": "#/components/schemas/PlainError"
+          },
+          {
+            "$ref": "#/components/schemas/UnknownError"
+          }
+        ],
+        "description": "Inner error body carried by every failure response, discriminated by `code`. Only `invalid_inputs` and `integration_connection_required` carry `details`."
       },
       "ErrorEnvelope": {
         "type": "object",
@@ -151,7 +215,6 @@
           }
         },
         "required": ["error"],
-        "additionalProperties": false,
         "description": "Envelope returned by every non-2xx response from the v1 REST API.",
         "examples": [
           {
@@ -217,7 +280,6 @@
           }
         },
         "required": ["offset", "limit", "hasMore"],
-        "additionalProperties": false,
         "description": "Offset-based pagination cursor for list endpoints."
       },
       "WorkflowListItem": {
@@ -297,7 +359,6 @@
           "credentialMode",
           "requiredProviders"
         ],
-        "additionalProperties": false,
         "description": "Compact row in the paginated workflow catalog. Fetch GET /workflows/{id} for the input schema."
       },
       "WorkflowListResponse": {
@@ -314,7 +375,6 @@
           }
         },
         "required": ["workflows", "pagination"],
-        "additionalProperties": false,
         "description": "Response body for GET /workflows."
       },
       "WorkflowInputType": {
@@ -335,7 +395,6 @@
           }
         },
         "required": ["label", "value"],
-        "additionalProperties": false,
         "description": "One selectable choice for a `dropdown` input."
       },
       "WorkflowInputField": {
@@ -381,7 +440,6 @@
           }
         },
         "required": ["nodeId", "name", "type"],
-        "additionalProperties": false,
         "description": "Single input field from the workflow's published input schema."
       },
       "WorkflowRunResponseShape": {
@@ -411,12 +469,10 @@
                 "format": "uri"
               }
             },
-            "required": ["id", "status", "statusUrl", "eventsUrl", "streamUrl"],
-            "additionalProperties": false
+            "required": ["id", "status", "statusUrl", "eventsUrl", "streamUrl"]
           }
         },
         "required": ["run"],
-        "additionalProperties": false,
         "description": "Documentation-only shape showing what POST /runs returns for this workflow."
       },
       "WorkflowExampleRunRequest": {
@@ -454,7 +510,6 @@
           }
         },
         "required": ["method", "url", "body"],
-        "additionalProperties": false,
         "description": "Ready-to-copy example POST /runs payload for this workflow."
       },
       "WorkflowDetail": {
@@ -609,7 +664,6 @@
           "responseShape",
           "exampleRequest"
         ],
-        "additionalProperties": false,
         "description": "Full workflow detail with input schema and version visibility."
       },
       "CreateRunRequest": {
@@ -660,7 +714,6 @@
           }
         },
         "required": ["run"],
-        "additionalProperties": false,
         "description": "Response body for POST /runs (202 Accepted)."
       },
       "AcceptedRun": {
@@ -694,7 +747,6 @@
           }
         },
         "required": ["id", "status", "statusUrl", "eventsUrl", "streamUrl"],
-        "additionalProperties": false,
         "description": "The `run` sub-object returned by POST /runs (202 Accepted)."
       },
       "RunOutputField": {
@@ -823,7 +875,6 @@
           "queue",
           "outputs"
         ],
-        "additionalProperties": false,
         "description": "Response body for GET /runs/{id}."
       },
       "RunOutcome": {
@@ -865,7 +916,6 @@
           }
         },
         "required": ["state", "position", "etaSeconds"],
-        "additionalProperties": false,
         "description": "Edgaze starts runs immediately while it has capacity. At full capacity a run waits in line and starts automatically, in order; nothing is needed from the caller and nothing is charged for waiting. A run that waits past its limit fails with a reason and is not charged."
       },
       "RunListItem": {
@@ -946,8 +996,33 @@
           "billingStatus",
           "outcome"
         ],
-        "additionalProperties": false,
         "description": "Compact row in the run history. Outputs and failure reasons are omitted here — read GET /runs/{id} for a single run's full detail."
+      },
+      "RunListPagination": {
+        "type": "object",
+        "properties": {
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Offset of the first row in this page. Always 0 when the request used `cursor`."
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 50,
+            "description": "Page size actually applied (max 50)."
+          },
+          "hasMore": {
+            "type": "boolean",
+            "description": "True when another page follows this one."
+          },
+          "nextCursor": {
+            "description": "Pass as `cursor` to fetch the next page; `null` when `hasMore` is false. Opaque: do not parse or build it. Present on offset pages too, so you can switch to cursors at any point.",
+            "type": ["string", "null"]
+          }
+        },
+        "required": ["offset", "limit", "hasMore", "nextCursor"],
+        "description": "Pagination for GET /runs. Prefer `nextCursor`: an offset shifts by one row for every run created while you page, so offset paging can repeat or skip runs; a cursor cannot."
       },
       "RunListResponse": {
         "type": "object",
@@ -959,11 +1034,10 @@
             }
           },
           "pagination": {
-            "$ref": "#/components/schemas/Pagination"
+            "$ref": "#/components/schemas/RunListPagination"
           }
         },
         "required": ["runs", "pagination"],
-        "additionalProperties": false,
         "description": "Response body for GET /runs."
       },
       "CancelRunResponse": {
@@ -984,7 +1058,6 @@
           }
         },
         "required": ["id", "status", "cancelRequested"],
-        "additionalProperties": false,
         "description": "Response body for POST /runs/{id}/cancel."
       },
       "RunEventActivity": {
@@ -1023,12 +1096,10 @@
                 "minimum": 1
               }
             },
-            "required": ["current"],
-            "additionalProperties": false
+            "required": ["current"]
           }
         },
         "required": ["kind", "label"],
-        "additionalProperties": false,
         "description": "Presented runs only: a customer-facing description of what a stage is doing."
       },
       "RunProgressHint": {
@@ -1053,7 +1124,6 @@
           }
         },
         "required": ["floor", "ceiling", "etaMs"],
-        "additionalProperties": false,
         "description": "Presented runs only: ease from `floor` toward `ceiling` over `etaMs` without reaching it; the next hint moves the band."
       },
       "RunEventData": {
@@ -1094,7 +1164,6 @@
             "description": "Presented runs only: the result's value when it is small enough to inline. GET /runs/{id} always carries the full outputs."
           }
         },
-        "additionalProperties": false,
         "description": "Event-specific content, projected to the fields that are safe for the caller. `activity`, `progress`, `isOutput`, `outputLabel` and `output` appear only on presented runs (workflows the caller did not create)."
       },
       "RunEvent": {
@@ -1166,7 +1235,6 @@
           }
         },
         "required": ["type", "sequence", "ts", "nodeId", "attempt", "data"],
-        "additionalProperties": false,
         "description": "One row in the durable run event log."
       },
       "RunEventsPage": {
@@ -1200,7 +1268,6 @@
           }
         },
         "required": ["id", "events", "hasMore", "nextAfterSequence"],
-        "additionalProperties": false,
         "description": "Response body for GET /runs/{id}/events."
       },
       "RunStreamEvent": {
@@ -1272,7 +1339,6 @@
           }
         },
         "required": ["type", "runId", "sequence", "occurredAt"],
-        "additionalProperties": false,
         "description": "One run event on the SSE stream. The frame's `event:` is `run.status` for run lifecycle events (`status` is set) and the event's `type` otherwise; its `id:` is `sequence`. Same events as GET /runs/{id}/events, with this envelope: `occurredAt` instead of `ts`, `runId` added, `status`/`reason` lifted to the top level, and absent fields omitted rather than null."
       },
       "RunStreamSnapshot": {
@@ -1299,12 +1365,10 @@
                 "description": "Highest sequence in the run's log when the snapshot was taken."
               }
             },
-            "required": ["id", "status", "reason", "lastEventSequence"],
-            "additionalProperties": false
+            "required": ["id", "status", "reason", "lastEventSequence"]
           }
         },
         "required": ["run"],
-        "additionalProperties": false,
         "description": "The run's folded state. Sent first on every connection and again as the last frame when the run ends. Carries no SSE `id:`, so it never moves your resume cursor. Read outputs from GET /runs/{id}."
       },
       "RunStreamPing": {
@@ -1316,7 +1380,6 @@
           }
         },
         "required": ["t"],
-        "additionalProperties": false,
         "description": "Heartbeat sent every 15 seconds while idle. No SSE `id:`; ignore it."
       },
       "RunStreamReconnect": {
@@ -1334,7 +1397,6 @@
           }
         },
         "required": ["lastSequence", "retryMs"],
-        "additionalProperties": false,
         "description": "Planned roll-over, about every 5 minutes. The connection then closes; reconnect with `Last-Event-ID: <lastSequence>` and nothing is lost or repeated. Not an error."
       },
       "RunStreamError": {
@@ -1346,7 +1408,6 @@
           }
         },
         "required": ["error"],
-        "additionalProperties": false,
         "description": "The stream failed on the server. The connection then closes; reconnect with the last `id:` you processed."
       },
       "WorkflowVersionSummary": {
@@ -1372,7 +1433,6 @@
           }
         },
         "required": ["id", "createdAt", "releaseNotes", "isActive", "isPurchased"],
-        "additionalProperties": false,
         "description": "Compact metadata for one immutable workflow version."
       },
       "WorkflowVersionsResponse": {
@@ -1422,7 +1482,6 @@
           "updateAvailable",
           "versions"
         ],
-        "additionalProperties": false,
         "description": "Response body for GET /workflows/{id}/versions. Owners see the full history; buyers see the versions their pin or entitlement covers."
       },
       "AcceptWorkflowUpdateResponse": {
@@ -1444,7 +1503,6 @@
           }
         },
         "required": ["ok", "workflowId", "pinnedVersionId"],
-        "additionalProperties": false,
         "description": "Confirms the buyer's purchase pin was re-pinned to the workflow's current active version."
       },
       "WebhookRunEventPayload": {
@@ -1485,7 +1543,6 @@
           }
         },
         "required": ["type", "runId", "status", "outcome", "reason", "runUrl", "occurredAt"],
-        "additionalProperties": false,
         "description": "Body posted to a webhook endpoint when a run reaches a terminal state. To deduplicate, use the `edgaze-delivery-id` header, or `runId` plus `type` when that header is absent."
       },
       "WebhookTestPayload": {
@@ -1505,8 +1562,45 @@
           }
         },
         "required": ["type", "message", "occurredAt"],
-        "additionalProperties": false,
         "description": "Body posted when a developer clicks Send test in the developer console. It carries no run."
+      },
+      "UnknownError": {
+        "type": "object",
+        "description": "Inner error body for an error code this version of the document does not list yet. Handle it like any other error with the same HTTP status.",
+        "properties": {
+          "code": {
+            "type": "string",
+            "not": {
+              "enum": [
+                "unauthorized",
+                "insufficient_scope",
+                "forbidden",
+                "not_found",
+                "invalid_request",
+                "invalid_json",
+                "invalid_inputs",
+                "missing_workflow",
+                "invalid_cursor",
+                "method_not_allowed",
+                "spend_cap_reached",
+                "idempotency_conflict",
+                "rate_limited",
+                "account_restricted",
+                "integration_connection_required",
+                "creator_listings_paused",
+                "output_too_large",
+                "cancel_unavailable",
+                "internal_error"
+              ]
+            },
+            "description": "A code added after this version of the document."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable failure reason. Do not parse; branch on `code` instead."
+          }
+        },
+        "required": ["code", "message"]
       },
       "ListWorkflowsQuery": {
         "type": "object",
@@ -1561,8 +1655,12 @@
             "minLength": 1,
             "format": "uuid"
           },
+          "cursor": {
+            "description": "`pagination.nextCursor` from the previous page. Recommended over `offset`, which can repeat or skip runs created while you page. Cannot be combined with `offset`.",
+            "type": "string"
+          },
           "offset": {
-            "description": "Pagination offset. Defaults to 0.",
+            "description": "Pagination offset. Defaults to 0. Prefer `cursor`; cannot be combined with it.",
             "type": "integer",
             "minimum": 0
           },
@@ -1664,6 +1762,12 @@
           "200": {
             "description": "Paginated workflow catalog.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1688,6 +1792,12 @@
           "400": {
             "description": "Invalid query parameters.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1717,11 +1827,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["invalid_request"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1751,11 +1868,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "API key is missing the required scope.",
+            "description": "API key is missing the required scope. `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1785,11 +1909,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["insufficient_scope", "account_restricted"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1819,7 +1991,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -1852,6 +2025,12 @@
           "200": {
             "description": "Workflow detail.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1876,6 +2055,12 @@
           "400": {
             "description": "Missing or malformed workflow id.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1905,11 +2090,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["missing_workflow"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1939,11 +2131,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "Not entitled to this workflow.",
+            "description": "Not entitled to this workflow. `forbidden`: the caller has no access to this workflow, version, or purchase (non-leaky). `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -1973,11 +2172,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["forbidden", "insufficient_scope", "account_restricted"]
           },
           "404": {
             "description": "Workflow not found.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2007,11 +2213,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2041,7 +2295,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -2074,6 +2329,12 @@
           "200": {
             "description": "Entitled workflow versions.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2098,6 +2359,12 @@
           "400": {
             "description": "Missing or malformed workflow id.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2127,11 +2394,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["missing_workflow"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2161,11 +2435,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "Not entitled to this workflow.",
+            "description": "Not entitled to this workflow. `forbidden`: the caller has no access to this workflow, version, or purchase (non-leaky). `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2195,11 +2476,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["forbidden", "insufficient_scope", "account_restricted"]
           },
           "404": {
             "description": "Workflow not found.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2229,11 +2517,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2263,7 +2599,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -2296,6 +2633,12 @@
           "200": {
             "description": "Purchase pin updated.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2320,6 +2663,12 @@
           "400": {
             "description": "Missing or malformed workflow id.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2349,11 +2698,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["missing_workflow"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2383,11 +2739,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "Rejected for one of two reasons that need different client handling. `insufficient_scope`: the key lacks `workflow:write` — mint a key with that scope. `forbidden`: the key is valid and scoped, but the caller has no purchase to re-pin (including owner keys, which have no purchase) — there is nothing to retry. Branch on `error.code`.",
+            "description": "Rejected for one of two reasons that need different client handling. `insufficient_scope`: the key lacks `workflow:write` — mint a key with that scope. `forbidden`: the key is valid and scoped, but the caller has no purchase to re-pin (including owner keys, which have no purchase) — there is nothing to retry. Branch on `error.code`. `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2425,11 +2788,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["forbidden", "insufficient_scope", "account_restricted"]
           },
           "409": {
             "description": "Workflow has no active version to accept.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2459,11 +2829,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["invalid_request"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2493,7 +2911,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -2503,7 +2922,7 @@
       "get": {
         "operationId": "listRuns",
         "summary": "List runs",
-        "description": "Return the caller's own runs, newest first. Projected from the indexed run row rather than folded from the event log, so it omits `outputs` and `reason` and reports a suspended run as `running` — read GET /runs/{id} for a single run in full. Rate limiting: reads are not metered per-key today; only POST /runs is (up to 60 per minute is never limited). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "description": "Return the caller's own runs, newest first. Projected from the indexed run row rather than folded from the event log, so it omits `outputs` and `reason` and reports a suspended run as `running` — read GET /runs/{id} for a single run in full. Page with `cursor`: pass `pagination.nextCursor` until it is null. An `offset` shifts by one row for every run created while you page, so offset paging can repeat or skip runs; a cursor cannot. Rate limiting: reads are not metered per-key today; only POST /runs is (up to 60 per minute is never limited). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
         "tags": ["Runs"],
         "security": [
           {
@@ -2531,10 +2950,19 @@
             }
           },
           {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "description": "`pagination.nextCursor` from the previous page. Opaque. Cannot be combined with `offset`.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "name": "offset",
             "in": "query",
             "required": false,
-            "description": "Pagination offset. Defaults to 0.",
+            "description": "Pagination offset. Defaults to 0. Prefer `cursor`.",
             "schema": {
               "type": "string"
             }
@@ -2553,6 +2981,12 @@
           "200": {
             "description": "Paginated run history.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2575,8 +3009,14 @@
             }
           },
           "400": {
-            "description": "Invalid query parameters.",
+            "description": "Invalid query parameters (`invalid_request`, including `cursor` combined with `offset`), or a `cursor` this endpoint did not issue (`invalid_cursor`).",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2600,17 +3040,24 @@
                     "value": {
                       "error": {
                         "code": "invalid_request",
-                        "message": "Invalid query parameters."
+                        "message": "Invalid query parameters (`invalid_request`, including `cursor` combined with `offset`), or a `cursor` this endpoint did not issue (`invalid_cursor`)."
                       }
                     }
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["invalid_request", "invalid_cursor"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2640,11 +3087,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "API key is missing the required scope.",
+            "description": "API key is missing the required scope. `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2674,11 +3128,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["insufficient_scope", "account_restricted"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2708,7 +3210,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -2750,6 +3253,12 @@
           "202": {
             "description": "Run accepted.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2758,6 +3267,25 @@
               },
               "Vary": {
                 "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Deprecation": {
+                "description": "Present only when the request used the deprecated `workflowId` field. RFC 9745 date the field was deprecated, `@1786492800` (2026-08-12). Send `workflow` instead.",
+                "schema": {
+                  "type": "string",
+                  "examples": ["@1786492800"]
+                }
+              },
+              "Link": {
+                "description": "Present only with `Deprecation`: `<https://www.edgaze.ai/docs/api/versioning>; rel=\"deprecation\"`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Warning": {
+                "description": "Present only with `Deprecation`: `299 - \"workflowId is deprecated; use workflow\"`.",
                 "schema": {
                   "type": "string"
                 }
@@ -2774,6 +3302,12 @@
           "400": {
             "description": "Request rejected before the run started. `invalid_json`: the body was not parseable JSON. `missing_workflow`: no `workflow` id was supplied. `invalid_inputs`: one or more inputs were rejected — `error.details` lists the offending `input` keys. `invalid_request`: the `Idempotency-Key` header conflicted with `body.idempotencyKey`.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2825,11 +3359,23 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": [
+              "invalid_json",
+              "missing_workflow",
+              "invalid_inputs",
+              "invalid_request"
+            ]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2859,11 +3405,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "402": {
             "description": "This API key has reached its spend cap.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2893,11 +3446,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["spend_cap_reached"]
           },
           "403": {
-            "description": "Not entitled to run this workflow (`forbidden`), the account is restricted (`account_restricted`), or the creator's paid listings are paused (`creator_listings_paused`).",
+            "description": "Not entitled to run this workflow (`forbidden`), the account is restricted (`account_restricted`), or the creator's paid listings are paused (`creator_listings_paused`). `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`).",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2927,11 +3487,23 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": [
+              "forbidden",
+              "creator_listings_paused",
+              "insufficient_scope",
+              "account_restricted"
+            ]
           },
           "404": {
             "description": "Workflow not found.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2961,11 +3533,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
           },
           "409": {
             "description": "Idempotency key reused with a different request (`idempotency_conflict`), or the workflow needs third-party accounts the caller has not connected (`integration_connection_required`; `error.details` lists them, each with a `connectUrl`).",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -2995,11 +3574,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["idempotency_conflict", "integration_connection_required"]
           },
           "429": {
             "description": "Rate limited. A key that sends up to 60 POST /runs requests per minute is never rate limited. Above that, requests may be rejected with 429 `rate_limited`; how many more get through is not fixed, so do not plan around it. Wait `Retry-After` seconds, then retry with the same `Idempotency-Key`.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3047,11 +3633,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3081,7 +3674,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -3114,6 +3708,12 @@
           "200": {
             "description": "Run detail.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3138,6 +3738,12 @@
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3167,11 +3773,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "API key is missing the required scope.",
+            "description": "API key is missing the required scope. `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3201,11 +3814,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["insufficient_scope", "account_restricted"]
           },
           "404": {
             "description": "Run not found (also returned for cross-tenant reads).",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3235,11 +3855,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
           },
           "413": {
             "description": "The run's outputs are too large to return in one response.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3269,11 +3896,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["output_too_large"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3303,7 +3978,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -3336,6 +4012,12 @@
           "200": {
             "description": "Cancellation recorded.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3360,6 +4042,12 @@
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3389,11 +4077,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "API key is missing the required scope.",
+            "description": "API key is missing the required scope. `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3423,11 +4118,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["insufficient_scope", "account_restricted"]
           },
           "404": {
             "description": "Run not found (also returned for cross-tenant calls).",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3457,11 +4159,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3491,11 +4241,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           },
           "503": {
             "description": "Cancellation could not be delivered. Safe to retry.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3525,7 +4282,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["cancel_unavailable"]
           }
         },
         "x-scope-match": "any"
@@ -3579,6 +4337,12 @@
           "200": {
             "description": "Ordered page of events.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3603,6 +4367,12 @@
           "400": {
             "description": "Invalid pagination cursor.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3632,11 +4402,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["invalid_request"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3666,11 +4443,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "API key is missing the required scope.",
+            "description": "API key is missing the required scope. `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3700,11 +4484,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["insufficient_scope", "account_restricted"]
           },
           "404": {
             "description": "Run not found.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3734,11 +4525,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3768,7 +4607,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
@@ -3828,6 +4668,12 @@
               },
               "Vary": {
                 "description": "Includes `Authorization`.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
                 "schema": {
                   "type": "string"
                 }
@@ -3895,6 +4741,12 @@
           "400": {
             "description": "Invalid `Last-Event-ID` cursor.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3924,11 +4776,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["invalid_cursor"]
           },
           "401": {
             "description": "Invalid or missing API key.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3958,11 +4817,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["unauthorized"]
           },
           "403": {
-            "description": "API key is missing the required scope.",
+            "description": "API key is missing the required scope. `insufficient_scope`: the API key lacks every scope this operation accepts (`x-required-scopes`). `account_restricted`: the account that owns the API key is restricted. Not retryable.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -3992,11 +4858,18 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["insufficient_scope", "account_restricted"]
           },
           "404": {
             "description": "Run not found.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -4026,11 +4899,59 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["not_found"]
+          },
+          "429": {
+            "description": "`rate_limited`: too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes.",
+            "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "rate_limited",
+                        "message": "too many requests. Wait `Retry-After` seconds, then retry. Only POST /runs is limited today; every operation lists this so clients already handle it if that changes."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "x-error-codes": ["rate_limited"]
           },
           "500": {
             "description": "Unexpected server error before the stream opened.",
             "headers": {
+              "X-Request-Id": {
+                "description": "Identifies this request in Edgaze's logs. Present on every response, success or error. Quote it when you report a problem. Opaque: do not parse it.",
+                "schema": {
+                  "type": "string"
+                }
+              },
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
                 "schema": {
@@ -4060,7 +4981,8 @@
                   }
                 }
               }
-            }
+            },
+            "x-error-codes": ["internal_error"]
           }
         },
         "x-scope-match": "any"
