@@ -987,6 +987,75 @@
         "additionalProperties": false,
         "description": "Response body for POST /runs/{id}/cancel."
       },
+      "RunEventActivity": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "description": "Kind of work. Known values: `writing`, `thinking`, `image`, `understanding`, `reading`, `watching`, `fetching`, `integration`, `specialist`, `calculating`. Treat unknown values as generic work."
+          },
+          "label": {
+            "type": "string",
+            "description": "Customer-facing description of the stage."
+          },
+          "model": {
+            "description": "Display name of the model, when one runs.",
+            "type": "string"
+          },
+          "icon": {
+            "description": "Public image path of the model or app mark, e.g. `/misc/claude.png`.",
+            "type": "string"
+          },
+          "aspect": {
+            "description": "Image steps: the picture's shape as `W:H`, e.g. `16:9`.",
+            "type": "string"
+          },
+          "pass": {
+            "description": "Repeated stages: which pass this is, and how many when known.",
+            "type": "object",
+            "properties": {
+              "current": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "total": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "required": ["current"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["kind", "label"],
+        "additionalProperties": false,
+        "description": "Presented runs only: a customer-facing description of what a stage is doing."
+      },
+      "RunProgressHint": {
+        "type": "object",
+        "properties": {
+          "floor": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Confirmed progress, in percent."
+          },
+          "ceiling": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Progress this band may approach, in percent, until the next hint arrives."
+          },
+          "etaMs": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Estimated milliseconds to reach `ceiling`."
+          }
+        },
+        "required": ["floor", "ceiling", "etaMs"],
+        "additionalProperties": false,
+        "description": "Presented runs only: ease from `floor` toward `ceiling` over `etaMs` without reaching it; the next hint moves the band."
+      },
       "RunEventData": {
         "type": "object",
         "properties": {
@@ -1005,10 +1074,28 @@
           "queue": {
             "description": "Present on `run.queue_position`: the run is waiting for capacity (`state: waiting`, its place in line and an estimated wait) or has just left the line (`state: starting`, position 0).",
             "$ref": "#/components/schemas/RunQueue"
+          },
+          "activity": {
+            "$ref": "#/components/schemas/RunEventActivity"
+          },
+          "progress": {
+            "$ref": "#/components/schemas/RunProgressHint"
+          },
+          "isOutput": {
+            "description": "Presented runs only: `true` on a stage that produces a result.",
+            "type": "boolean",
+            "const": true
+          },
+          "outputLabel": {
+            "description": "Presented runs only: the name of the result this stage produces.",
+            "type": "string"
+          },
+          "output": {
+            "description": "Presented runs only: the result's value when it is small enough to inline. GET /runs/{id} always carries the full outputs."
           }
         },
         "additionalProperties": false,
-        "description": "Event-specific content, projected to the fields that are safe for the caller."
+        "description": "Event-specific content, projected to the fields that are safe for the caller. `activity`, `progress`, `isOutput`, `outputLabel` and `output` appear only on presented runs (workflows the caller did not create)."
       },
       "RunEvent": {
         "type": "object",
@@ -1051,7 +1138,7 @@
             "format": "date-time"
           },
           "nodeId": {
-            "description": "Workflow node this event belongs to, or `null` for run-level events.",
+            "description": "Workflow node this event belongs to, or `null` for run-level events. On presented runs (workflows the caller did not create) this is an opaque stage id: stable within one run, unrelated across runs and to the workflow's input `nodeId`s.",
             "type": ["string", "null"]
           },
           "attempt": {
@@ -1115,6 +1202,152 @@
         "required": ["id", "events", "hasMore", "nextAfterSequence"],
         "additionalProperties": false,
         "description": "Response body for GET /runs/{id}/events."
+      },
+      "RunStreamEvent": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "run.queued",
+                  "run.queue_position",
+                  "run.preparing",
+                  "run.started",
+                  "run.suspended",
+                  "run.resumed",
+                  "run.completed",
+                  "run.failed",
+                  "run.cancelled",
+                  "node.started",
+                  "node.output.delta",
+                  "node.completed",
+                  "node.failed",
+                  "node.retry_scheduled",
+                  "node.skipped"
+                ]
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "description": "Event name, the same values as `RunEvent.type`. Ignore values you do not recognize."
+          },
+          "runId": {
+            "type": "string",
+            "minLength": 1,
+            "format": "uuid"
+          },
+          "sequence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Same as the frame's SSE `id:`. Resume with it as `Last-Event-ID`."
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the event happened. `RunEvent.ts` on GET /runs/{id}/events."
+          },
+          "nodeId": {
+            "description": "Node (or, on presented runs, opaque per-run stage id) the event belongs to. Omitted on run-level events.",
+            "type": "string"
+          },
+          "attempt": {
+            "description": "1-based execution attempt on node events. Omitted on run-level events.",
+            "type": "integer",
+            "minimum": 1
+          },
+          "status": {
+            "description": "Run status this event implies. Present exactly on run lifecycle events, which are sent with `event: run.status`.",
+            "$ref": "#/components/schemas/PublicRunStatus"
+          },
+          "reason": {
+            "description": "Buyer-safe failure text, on the event that fails the run.",
+            "type": "string"
+          },
+          "data": {
+            "description": "Event-specific content. Omitted when the event carries none.",
+            "$ref": "#/components/schemas/RunEventData"
+          }
+        },
+        "required": ["type", "runId", "sequence", "occurredAt"],
+        "additionalProperties": false,
+        "description": "One run event on the SSE stream. The frame's `event:` is `run.status` for run lifecycle events (`status` is set) and the event's `type` otherwise; its `id:` is `sequence`. Same events as GET /runs/{id}/events, with this envelope: `occurredAt` instead of `ts`, `runId` added, `status`/`reason` lifted to the top level, and absent fields omitted rather than null."
+      },
+      "RunStreamSnapshot": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "format": "uuid"
+              },
+              "status": {
+                "$ref": "#/components/schemas/PublicRunStatus"
+              },
+              "reason": {
+                "description": "Buyer-safe failure text when `status` is `failed`, otherwise null.",
+                "type": ["string", "null"]
+              },
+              "lastEventSequence": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Highest sequence in the run's log when the snapshot was taken."
+              }
+            },
+            "required": ["id", "status", "reason", "lastEventSequence"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["run"],
+        "additionalProperties": false,
+        "description": "The run's folded state. Sent first on every connection and again as the last frame when the run ends. Carries no SSE `id:`, so it never moves your resume cursor. Read outputs from GET /runs/{id}."
+      },
+      "RunStreamPing": {
+        "type": "object",
+        "properties": {
+          "t": {
+            "type": "integer",
+            "description": "Server time, in Unix milliseconds."
+          }
+        },
+        "required": ["t"],
+        "additionalProperties": false,
+        "description": "Heartbeat sent every 15 seconds while idle. No SSE `id:`; ignore it."
+      },
+      "RunStreamReconnect": {
+        "type": "object",
+        "properties": {
+          "lastSequence": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Last sequence sent on this connection; also the frame's SSE `id:`."
+          },
+          "retryMs": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Suggested wait before reconnecting; also sent as SSE `retry:`."
+          }
+        },
+        "required": ["lastSequence", "retryMs"],
+        "additionalProperties": false,
+        "description": "Planned roll-over, about every 5 minutes. The connection then closes; reconnect with `Last-Event-ID: <lastSequence>` and nothing is lost or repeated. Not an error."
+      },
+      "RunStreamError": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Human-readable explanation. Do not parse."
+          }
+        },
+        "required": ["error"],
+        "additionalProperties": false,
+        "description": "The stream failed on the server. The connection then closes; reconnect with the last `id:` you processed."
       },
       "WorkflowVersionSummary": {
         "type": "object",
@@ -1217,85 +1450,63 @@
       "WebhookRunEventPayload": {
         "type": "object",
         "properties": {
-          "id": {
+          "type": {
+            "type": "string",
+            "enum": ["run.completed", "run.failed", "run.cancelled"],
+            "description": "Event type. Matches the `edgaze-event` header."
+          },
+          "runId": {
             "type": "string",
             "minLength": 1,
             "format": "uuid",
-            "description": "Unique event id, safe to dedupe on."
+            "description": "The run that reached a terminal state."
           },
-          "type": {
+          "status": {
             "type": "string",
-            "enum": ["run.completed", "run.failed", "run.cancelled"]
+            "enum": ["completed", "failed", "cancelled"],
+            "description": "Terminal run status, as GET /runs/{id} reports it."
           },
-          "createdAt": {
+          "outcome": {
+            "$ref": "#/components/schemas/RunOutcome"
+          },
+          "reason": {
+            "description": "Buyer-safe failure explanation, the same text as `Run.reason`. Non-null only when `status` is `failed`.",
+            "type": ["string", "null"]
+          },
+          "runUrl": {
             "type": "string",
-            "format": "date-time"
+            "format": "uri",
+            "description": "Absolute URL for GET /runs/{id}. The body carries no outputs or charge: fetch this URL with an API key that has `run:read` to read them."
           },
-          "data": {
-            "type": "object",
-            "properties": {
-              "runId": {
-                "type": "string",
-                "minLength": 1,
-                "format": "uuid"
-              },
-              "workflowId": {
-                "anyOf": [
-                  {
-                    "type": "string",
-                    "minLength": 1,
-                    "format": "uuid"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "status": {
-                "$ref": "#/components/schemas/PublicRunStatus"
-              },
-              "outcome": {
-                "$ref": "#/components/schemas/RunOutcome"
-              },
-              "displayedChargeUsd": {
-                "type": ["number", "null"]
-              }
-            },
-            "required": ["runId", "workflowId", "status"],
-            "additionalProperties": {}
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the run reached its terminal state."
           }
         },
-        "required": ["id", "type", "createdAt", "data"],
+        "required": ["type", "runId", "status", "outcome", "reason", "runUrl", "occurredAt"],
         "additionalProperties": false,
-        "description": "Body posted to a webhook endpoint when a run reaches a terminal state."
+        "description": "Body posted to a webhook endpoint when a run reaches a terminal state. To deduplicate, use the `edgaze-delivery-id` header, or `runId` plus `type` when that header is absent."
       },
       "WebhookTestPayload": {
         "type": "object",
         "properties": {
-          "id": {
-            "type": "string",
-            "minLength": 1,
-            "format": "uuid"
-          },
           "type": {
             "type": "string",
             "const": "webhook.test"
           },
-          "createdAt": {
+          "message": {
+            "type": "string",
+            "examples": ["This is a test delivery from Edgaze."]
+          },
+          "occurredAt": {
             "type": "string",
             "format": "date-time"
-          },
-          "data": {
-            "type": "object",
-            "propertyNames": {
-              "type": "string"
-            },
-            "additionalProperties": {}
           }
         },
-        "required": ["id", "type", "createdAt", "data"],
+        "required": ["type", "message", "occurredAt"],
         "additionalProperties": false,
-        "description": "Body posted when a receiver clicks Send test in the developer console."
+        "description": "Body posted when a developer clicks Send test in the developer console. It carries no run."
       },
       "ListWorkflowsQuery": {
         "type": "object",
@@ -2292,7 +2503,7 @@
       "get": {
         "operationId": "listRuns",
         "summary": "List runs",
-        "description": "Return the caller's own runs, newest first. Projected from the indexed run row rather than folded from the event log, so it omits `outputs` and `reason` and reports a suspended run as `running` — read GET /runs/{id} for a single run in full. Rate limiting: reads are not metered per-key today — only POST /runs is (60/minute). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "description": "Return the caller's own runs, newest first. Projected from the indexed run row rather than folded from the event log, so it omits `outputs` and `reason` and reports a suspended run as `running` — read GET /runs/{id} for a single run in full. Rate limiting: reads are not metered per-key today; only POST /runs is (up to 60 per minute is never limited). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
         "tags": ["Runs"],
         "security": [
           {
@@ -2787,7 +2998,7 @@
             }
           },
           "429": {
-            "description": "Rate limited (60 POST /runs per minute per API key).",
+            "description": "Rate limited. A key that sends up to 60 POST /runs requests per minute is never rate limited. Above that, requests may be rejected with 429 `rate_limited`; how many more get through is not fixed, so do not plan around it. Wait `Retry-After` seconds, then retry with the same `Idempotency-Key`.",
             "headers": {
               "Cache-Control": {
                 "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
@@ -2808,13 +3019,13 @@
                 }
               },
               "X-RateLimit-Limit": {
-                "description": "Requests permitted per minute (currently 60 per API key).",
+                "description": "The per-minute rate that is guaranteed not to be limited (60). Sent only on a 429 response.",
                 "schema": {
                   "type": "string"
                 }
               },
               "X-RateLimit-Remaining": {
-                "description": "Requests remaining in the current window.",
+                "description": "Always `0`. Sent only on a 429 response.",
                 "schema": {
                   "type": "string"
                 }
@@ -2880,7 +3091,7 @@
       "get": {
         "operationId": "getRun",
         "summary": "Get run",
-        "description": "Read the run's canonical status, sanitized failure reason, buyer-facing displayed charge, and outputs. Rate limiting: reads are not metered per-key today — only POST /runs is (60/minute). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "description": "Read the run's canonical status, sanitized failure reason, buyer-facing displayed charge, and outputs. Rate limiting: reads are not metered per-key today; only POST /runs is (up to 60 per minute is never limited). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
         "tags": ["Runs"],
         "security": [
           {
@@ -3324,7 +3535,7 @@
       "get": {
         "operationId": "listRunEvents",
         "summary": "List run events",
-        "description": "Return an ordered, bounded page of durable run lifecycle events. Continue from `nextAfterSequence` while `hasMore` is true. Each event carries a `data` object with the content for its type — most importantly `data.text` on `node.output.delta`, which you concatenate in `sequence` order to reconstruct a node's streamed output. Rate limiting: reads are not metered per-key today — only POST /runs is (60/minute). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
+        "description": "Return an ordered, bounded page of durable run lifecycle events. Continue from `nextAfterSequence` while `hasMore` is true. Each event carries a `data` object with the content for its type — most importantly `data.text` on `node.output.delta`, which you concatenate in `sequence` order to reconstruct a node's streamed output. Rate limiting: reads are not metered per-key today; only POST /runs is (up to 60 per minute is never limited). Reads may become metered without a breaking change, so treat 429 with `Retry-After` as possible on any endpoint and back off rather than polling in a tight loop. For run progress prefer GET /runs/{id}/stream, or poll GET /runs/{id} no more than once per second.",
         "tags": ["Runs"],
         "security": [
           {
@@ -3567,7 +3778,7 @@
       "get": {
         "operationId": "streamRun",
         "summary": "Stream run",
-        "description": "Server-Sent Events stream of the run's log. Resume with the `Last-Event-ID` header to skip already-received sequences. Each SSE `data:` frame is a `RunEvent` — the `event:` name is the event type (or `run.status` for lifecycle transitions) and `id:` is the `sequence`. Node output arrives as `node.output.delta` frames whose `data.text` you append in order, so this is the endpoint to build a live progress UI on rather than polling. A connection rolls over about every 5 minutes: it ends with `retry: 1000` and an `event: reconnect` frame whose `id:` is the last sequence it sent; reconnect with that id as `Last-Event-ID` and nothing is lost or repeated.",
+        "description": "Server-Sent Events stream of the run's log. Every frame's `data:` is one JSON object, and the `event:` name says which schema it follows (listed in `x-sse-events` on the 200 response). A connection opens with an `event: snapshot` frame (`RunStreamSnapshot`), replays the run's events, then tails new ones. Each event frame's `data` is a `RunStreamEvent` and its `id:` is the event's `sequence`; its `event:` is `run.status` for run lifecycle events and the event type otherwise. `RunStreamEvent` carries the same events as GET /runs/{id}/events in a different envelope (`occurredAt` instead of `ts`, `status`/`reason` at the top level, absent fields omitted). Node output arrives as `node.output.delta` frames whose `data.text` you append in order, so this is the endpoint to build a live progress UI on rather than polling. While idle the server sends `event: ping` every 15 seconds (`RunStreamPing`, no `id:`). When the run ends it sends a final `snapshot` and closes. A connection rolls over about every 5 minutes: it ends with `retry: 1000` and an `event: reconnect` frame (`RunStreamReconnect`) whose `id:` is the last sequence it sent; reconnect with that id as `Last-Event-ID` and nothing is lost or repeated. If the stream fails on the server it sends `event: error` (`RunStreamError`) and closes; reconnect the same way. Ignore `event:` names you do not recognize, and frames without an `id:` never move your resume cursor.",
         "tags": ["Runs"],
         "security": [
           {
@@ -3634,6 +3845,50 @@
                   "type": "string",
                   "description": "SSE-encoded event stream."
                 }
+              }
+            },
+            "x-sse-events": {
+              "snapshot": {
+                "description": "First frame of every connection, and the last frame when the run ends.",
+                "schema": {
+                  "$ref": "#/components/schemas/RunStreamSnapshot"
+                },
+                "hasId": false
+              },
+              "run.status": {
+                "description": "A run lifecycle event (`status` is set).",
+                "schema": {
+                  "$ref": "#/components/schemas/RunStreamEvent"
+                },
+                "hasId": true
+              },
+              "*": {
+                "description": "Any other event name is the event's `type` (for example `node.output.delta`) and carries a `RunStreamEvent`.",
+                "schema": {
+                  "$ref": "#/components/schemas/RunStreamEvent"
+                },
+                "hasId": true
+              },
+              "ping": {
+                "description": "Idle heartbeat every 15 seconds. Ignore it.",
+                "schema": {
+                  "$ref": "#/components/schemas/RunStreamPing"
+                },
+                "hasId": false
+              },
+              "reconnect": {
+                "description": "Planned roll-over about every 5 minutes; reconnect with its `id:` as `Last-Event-ID`.",
+                "schema": {
+                  "$ref": "#/components/schemas/RunStreamReconnect"
+                },
+                "hasId": true
+              },
+              "error": {
+                "description": "The stream failed on the server; reconnect with the last `id:` you processed.",
+                "schema": {
+                  "$ref": "#/components/schemas/RunStreamError"
+                },
+                "hasId": false
               }
             }
           },
@@ -3772,6 +4027,40 @@
                 }
               }
             }
+          },
+          "500": {
+            "description": "Unexpected server error before the stream opened.",
+            "headers": {
+              "Cache-Control": {
+                "description": "Always `private, no-store` on authenticated endpoints to prevent shared caching.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Vary": {
+                "description": "Always includes `Authorization` on authenticated endpoints.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                },
+                "examples": {
+                  "default": {
+                    "value": {
+                      "error": {
+                        "code": "internal_error",
+                        "message": "Unexpected server error before the stream opened."
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "x-scope-match": "any"
@@ -3782,7 +4071,7 @@
     "run.completed": {
       "post": {
         "summary": "Run reached the completed state.",
-        "description": "Sent once a run settles successfully, after billing has committed, so `displayedChargeUsd` on the run is final. Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries. Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint whose deliveries fail 15 times consecutively is paused until it is re-enabled in the developer console. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "description": "Sent once a run settles successfully, after billing has committed. The body carries no outputs or charge; fetch `runUrl` (GET /runs/{id}) to read them, and `displayedChargeUsd` there is final. Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries (or on the body's `runId` plus `type` when that header is absent). Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint is paused after 15 consecutive deliveries that exhaust every attempt, until it is re-enabled in the developer console. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
         "parameters": [
           {
             "name": "edgaze-signature",
@@ -3808,7 +4097,7 @@
             "name": "edgaze-delivery-id",
             "in": "header",
             "required": false,
-            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent only on a manual test delivery, which is never retried.",
+            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent on a manual test delivery and on a rare single-attempt fallback delivery (sent when the delivery could not be queued); neither is retried. Deduplicate those on the body's `runId` plus `type`.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -3856,7 +4145,7 @@
     "run.failed": {
       "post": {
         "summary": "Run reached the failed state.",
-        "description": "Sent once a run terminates unsuccessfully. The payload carries the same buyer-safe `reason` as GET /runs/{id}. Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries. Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint whose deliveries fail 15 times consecutively is paused until it is re-enabled in the developer console. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "description": "Sent once a run terminates unsuccessfully. The body's `reason` is the same buyer-safe text as GET /runs/{id}. Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries (or on the body's `runId` plus `type` when that header is absent). Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint is paused after 15 consecutive deliveries that exhaust every attempt, until it is re-enabled in the developer console. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
         "parameters": [
           {
             "name": "edgaze-signature",
@@ -3882,7 +4171,7 @@
             "name": "edgaze-delivery-id",
             "in": "header",
             "required": false,
-            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent only on a manual test delivery, which is never retried.",
+            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent on a manual test delivery and on a rare single-attempt fallback delivery (sent when the delivery could not be queued); neither is retried. Deduplicate those on the body's `runId` plus `type`.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -3930,7 +4219,7 @@
     "run.cancelled": {
       "post": {
         "summary": "Run was cancelled.",
-        "description": "Sent after POST /runs/{id}/cancel or a cancellation from the web UI. A cancelled run is never charged. Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries. Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint whose deliveries fail 15 times consecutively is paused until it is re-enabled in the developer console. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
+        "description": "Sent after POST /runs/{id}/cancel or a cancellation from the web UI. A cancelled run is never charged. Delivery is at-least-once. Each attempt has a 5 second timeout; a 5xx, 408, 425, 429, connection error, or timeout is retried with exponential backoff (up to 6 attempts over roughly 9 hours, honouring a longer Retry-After). Any other 4xx or a redirect is treated as a permanent rejection and is not retried. Because an event can therefore arrive more than once, deduplicate on the edgaze-delivery-id header, which is stable across retries (or on the body's `runId` plus `type` when that header is absent). Endpoints are delivered in parallel and ordering is not guaranteed. An endpoint is paused after 15 consecutive deliveries that exhaust every attempt, until it is re-enabled in the developer console. Return 2xx as soon as you have persisted the payload, and do the real work asynchronously.",
         "parameters": [
           {
             "name": "edgaze-signature",
@@ -3956,7 +4245,7 @@
             "name": "edgaze-delivery-id",
             "in": "header",
             "required": false,
-            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent only on a manual test delivery, which is never retried.",
+            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent on a manual test delivery and on a rare single-attempt fallback delivery (sent when the delivery could not be queued); neither is retried. Deduplicate those on the body's `runId` plus `type`.",
             "schema": {
               "type": "string",
               "format": "uuid"
@@ -4030,7 +4319,7 @@
             "name": "edgaze-delivery-id",
             "in": "header",
             "required": false,
-            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent only on a manual test delivery, which is never retried.",
+            "description": "UUID of this delivery, repeated byte-for-byte on every retry of the same event. This is the deduplication key: record it once you have processed a delivery and return 2xx without reprocessing if it arrives again. Absent on a manual test delivery and on a rare single-attempt fallback delivery (sent when the delivery could not be queued); neither is retried. Deduplicate those on the body's `runId` plus `type`.",
             "schema": {
               "type": "string",
               "format": "uuid"
